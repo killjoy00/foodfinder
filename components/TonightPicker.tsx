@@ -154,6 +154,31 @@ export function TonightPicker({
           ))}
         </div>
 
+        <div className="flex flex-wrap gap-2">
+          <span className="w-full text-xs font-semibold uppercase tracking-wide text-muted">
+            Quality bar{" "}
+            <span className="normal-case">
+              (someone {filters.eaterIds.length > 0 ? "eating tonight" : "in the family"} rates it
+              at least…)
+            </span>
+          </span>
+          <Chip
+            active={filters.minScore === 0}
+            onClick={() => setFilters({ ...filters, minScore: 0, excludeIds: [] })}
+          >
+            Anything goes
+          </Chip>
+          {[5, 6, 7, 8].map((n) => (
+            <Chip
+              key={n}
+              active={filters.minScore === n}
+              onClick={() => setFilters({ ...filters, minScore: n, excludeIds: [] })}
+            >
+              {n}+
+            </Chip>
+          ))}
+        </div>
+
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted">
             Adventure level — {filters.wishlistPercent}% chance of somewhere new

@@ -10,6 +10,7 @@ export type PickerFilters = {
   mode: "dine_in" | "takeout";
   eaterIds: string[]; // profiles eating tonight; empty = everyone unknown
   wishlistPercent: number; // 0-100 chance of picking from the wishlist pool
+  minScore: number; // 0 = any; else someone (eating) must rate it at least this
   excludeIds: string[]; // already rerolled / vetoed this session
 };
 
@@ -20,6 +21,7 @@ export const DEFAULT_FILTERS: PickerFilters = {
   mode: "dine_in",
   eaterIds: [],
   wishlistPercent: 20,
+  minScore: 5,
   excludeIds: [],
 };
 
@@ -51,9 +53,27 @@ export function streakCuisines(recentVisitCuisines: string[][]): Set<string> {
   return new Set([...counts.entries()].filter(([, n]) => n >= 2).map(([c]) => c));
 }
 
+/**
+ * Best rating among the selected eaters (all raters when nobody is
+ * selected); null when none of them have rated it yet.
+ */
+export function maxRelevantScore(r: RestaurantFull, eaterIds: string[]): number | null {
+  const ids = eaterIds.length > 0 ? eaterIds : Object.keys(r.ratings);
+  const scores = ids
+    .map((id) => r.ratings[id])
+    .filter((s): s is number => s !== undefined);
+  return scores.length > 0 ? Math.max(...scores) : null;
+}
+
 export function passesFilters(r: RestaurantFull, f: PickerFilters): boolean {
   if (f.excludeIds.includes(r.id)) return false;
   if (r.price > f.maxPrice) return false;
+  if (f.minScore > 0) {
+    // the quality bar: someone eating tonight has to actually like it —
+    // unrated places stay eligible so the wishlist isn't locked out
+    const best = maxRelevantScore(r, f.eaterIds);
+    if (best !== null && best < f.minScore) return false;
+  }
   if (f.mode === "takeout" && r.tags.length > 0 && !r.tags.includes("takeout")) {
     // only enforce when the restaurant has been tagged at all
     return false;

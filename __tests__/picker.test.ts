@@ -88,6 +88,36 @@ describe("passesFilters", () => {
   });
 });
 
+describe("quality bar (minScore)", () => {
+  it("excludes places nobody rates at or above the bar", () => {
+    const dud = restaurant({ ratings: { a: 3, b: 4 } });
+    expect(passesFilters(dud, { ...DEFAULT_FILTERS, minScore: 5 })).toBe(false);
+  });
+
+  it("passes if at least one family member likes it", () => {
+    const split = restaurant({ ratings: { a: 3, b: 8 } });
+    expect(passesFilters(split, { ...DEFAULT_FILTERS, minScore: 5 })).toBe(true);
+    expect(passesFilters(split, { ...DEFAULT_FILTERS, minScore: 9 })).toBe(false);
+  });
+
+  it("keeps unrated places (wishlist) eligible", () => {
+    expect(passesFilters(restaurant({ ratings: {} }), { ...DEFAULT_FILTERS, minScore: 8 })).toBe(true);
+  });
+
+  it("only considers the people actually eating", () => {
+    const r = restaurant({ ratings: { a: 3, b: 9 } });
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 5, eaterIds: ["a"] })).toBe(false);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 5, eaterIds: ["a", "b"] })).toBe(true);
+    // eater hasn't rated it -> treated as unrated, stays in
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 5, eaterIds: ["c"] })).toBe(true);
+  });
+
+  it("minScore 0 turns the bar off", () => {
+    const dud = restaurant({ ratings: { a: 1 } });
+    expect(passesFilters(dud, { ...DEFAULT_FILTERS, minScore: 0 })).toBe(true);
+  });
+});
+
 describe("weighCandidate", () => {
   it("boosts places not visited in a long time", () => {
     const recent = weighCandidate(
