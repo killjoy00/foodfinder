@@ -180,6 +180,12 @@ export class MemoryAdapter implements DataAdapter {
     return profile;
   }
 
+  async updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void> {
+    const s = store();
+    const idx = s.profiles.findIndex((p) => p.id === id);
+    if (idx >= 0) s.profiles[idx] = { ...s.profiles[idx], ...data };
+  }
+
   async deleteProfile(id: string): Promise<void> {
     const s = store();
     s.profiles = s.profiles.filter((p) => p.id !== id);

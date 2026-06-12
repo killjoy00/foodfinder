@@ -101,6 +101,14 @@ export class SupabaseAdapter implements DataAdapter {
     return { id: row.id, name: row.name, emoji: row.emoji, color: row.color };
   }
 
+  async updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void> {
+    const row: Row = {};
+    if (data.name !== undefined) row.name = data.name;
+    if (data.emoji !== undefined) row.emoji = data.emoji;
+    if (data.color !== undefined) row.color = data.color;
+    await this.unwrap(this.client.from("profiles").update(row).eq("id", id));
+  }
+
   async deleteProfile(id: string): Promise<void> {
     await this.unwrap(this.client.from("profiles").delete().eq("id", id));
   }

@@ -21,8 +21,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             className="flex items-center gap-2 rounded-full border border-border-soft bg-surface py-1 pl-1 pr-3 text-sm"
           >
             <span
-              className="flex h-7 w-7 items-center justify-center rounded-full text-lg"
-              style={{ backgroundColor: `${profile.color}33` }}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-base ring-1 ring-white/25"
+              style={{ backgroundColor: profile.color }}
             >
               {profile.emoji}
             </span>

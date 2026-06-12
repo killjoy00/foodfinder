@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { deleteProfileAction, saveSettingsAction } from "@/app/actions";
+import { deleteProfileAction, saveSettingsAction, updateProfileAction } from "@/app/actions";
+import { ProfileEditor } from "@/components/ProfileEditor";
 import { passwordRequired } from "@/lib/auth";
 import { db, isDemoMode } from "@/lib/data";
 import { placesKey } from "@/lib/places";
@@ -68,23 +69,39 @@ export default async function SettingsPage() {
 
       <section className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-surface p-4">
         <h2 className="font-bold">Family</h2>
-        <ul className="flex flex-col gap-2">
+        <ul className="flex flex-col gap-1">
           {profiles.map((p) => (
-            <li key={p.id} className="flex items-center gap-3">
-              <span
-                className="flex h-9 w-9 items-center justify-center rounded-full text-xl"
-                style={{ backgroundColor: `${p.color}33` }}
-              >
-                {p.emoji}
-              </span>
-              <span className="flex-1 font-semibold">{p.name}</span>
-              {profiles.length > 1 && (
-                <form action={deleteProfileAction.bind(null, p.id)}>
-                  <button className="text-sm text-red-400" title="Remove (their ratings go too)">
-                    Remove
-                  </button>
-                </form>
-              )}
+            <li key={p.id}>
+              <details className="group rounded-xl">
+                <summary className="flex cursor-pointer list-none items-center gap-3 rounded-xl px-2 py-2 hover:bg-surface-2">
+                  <span
+                    className="flex h-10 w-10 items-center justify-center rounded-full text-xl ring-2 ring-white/25"
+                    style={{ backgroundColor: p.color }}
+                  >
+                    {p.emoji}
+                  </span>
+                  <span className="flex-1 font-semibold">{p.name}</span>
+                  <span className="text-sm text-muted group-open:hidden">Edit</span>
+                  <span className="hidden text-sm text-muted group-open:inline">Close</span>
+                </summary>
+                <div className="mt-2 flex flex-col gap-3 rounded-xl border border-border-soft bg-surface-2/50 p-3">
+                  <ProfileEditor
+                    action={updateProfileAction.bind(null, p.id)}
+                    initial={p}
+                    submitLabel="Save changes"
+                  />
+                  {profiles.length > 1 && (
+                    <form action={deleteProfileAction.bind(null, p.id)}>
+                      <button
+                        className="w-full rounded-xl border border-red-900 px-4 py-2 text-sm font-semibold text-red-400"
+                        title="Remove (their ratings go too)"
+                      >
+                        Remove {p.name} (their ratings go too)
+                      </button>
+                    </form>
+                  )}
+                </div>
+              </details>
             </li>
           ))}
         </ul>

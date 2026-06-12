@@ -46,6 +46,21 @@ export async function addProfileAction(formData: FormData): Promise<void> {
   const color = String(formData.get("color") ?? "#f97316");
   await db().createProfile(name, emoji, color);
   revalidatePath("/profiles");
+  revalidatePath("/settings");
+}
+
+export async function updateProfileAction(profileId: string, formData: FormData): Promise<void> {
+  await requireProfile();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return;
+  await db().updateProfile(profileId, {
+    name,
+    emoji: String(formData.get("emoji") ?? "🙂").trim() || "🙂",
+    color: String(formData.get("color") ?? "#f97316"),
+  });
+  revalidatePath("/profiles");
+  revalidatePath("/settings");
+  revalidatePath("/");
 }
 
 export async function deleteProfileAction(profileId: string): Promise<void> {

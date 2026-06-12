@@ -87,7 +87,13 @@ export function TonightPicker({
                 setFilters({ ...filters, eaterIds: toggle(filters.eaterIds, p.id), excludeIds: [] })
               }
             >
-              {p.emoji} {p.name}
+              <span
+                className="mr-1 inline-flex h-5 w-5 items-center justify-center rounded-full align-middle text-xs"
+                style={{ backgroundColor: p.color }}
+              >
+                {p.emoji}
+              </span>
+              {p.name}
             </Chip>
           ))}
         </div>

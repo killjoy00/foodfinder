@@ -18,6 +18,7 @@ export interface DataAdapter {
   // profiles
   listProfiles(): Promise<Profile[]>;
   createProfile(name: string, emoji: string, color: string): Promise<Profile>;
+  updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void>;
   deleteProfile(id: string): Promise<void>;
 
   // restaurants (returned enriched with ratings + visit aggregates)
