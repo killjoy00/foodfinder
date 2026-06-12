@@ -14,7 +14,7 @@ import { Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
 import { logVisitAction, startVoteAction } from "@/app/actions";
 import { SpinWheel } from "./SpinWheel";
 import { ResultCard } from "./ResultCard";
-import { Chip } from "./ui";
+import { Chip, Segmented } from "./ui";
 
 type Phase = "idle" | "spinning" | "result";
 
@@ -115,32 +115,48 @@ export function TonightPicker({
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <span className="w-full text-xs font-semibold uppercase tracking-wide text-muted">
-            Vibe
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">Vibe</span>
+            <Segmented
+              options={[
+                { label: "🍽️ Dine in", value: "dine_in" },
+                { label: "🥡 Takeout", value: "takeout" },
+              ]}
+              value={filters.mode}
+              onChange={(mode) => setFilters({ ...filters, mode, excludeIds: [] })}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+              Max price
+            </span>
+            <Segmented
+              options={[1, 2, 3, 4].map((p) => ({ label: "$".repeat(p), value: p }))}
+              value={filters.maxPrice}
+              onChange={(maxPrice) => setFilters({ ...filters, maxPrice, excludeIds: [] })}
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Quality bar — lowest rating allowed on the wheel
           </span>
-          <Chip
-            active={filters.mode === "dine_in"}
-            onClick={() => setFilters({ ...filters, mode: "dine_in", excludeIds: [] })}
-          >
-            🍽️ Dine in
-          </Chip>
-          <Chip
-            active={filters.mode === "takeout"}
-            onClick={() => setFilters({ ...filters, mode: "takeout", excludeIds: [] })}
-          >
-            🥡 Takeout
-          </Chip>
-          {[1, 2, 3, 4].map((p) => (
-            <Chip
-              key={p}
-              active={filters.maxPrice === p}
-              onClick={() => setFilters({ ...filters, maxPrice: p, excludeIds: [] })}
-            >
-              {"$".repeat(p)}
-              {p < 4 ? " max" : ""}
-            </Chip>
-          ))}
+          <Segmented
+            options={[
+              { label: "Any", value: 0 },
+              ...[5, 6, 7, 8].map((n) => ({ label: `${n}+`, value: n })),
+            ]}
+            value={filters.minScore}
+            onChange={(minScore) => setFilters({ ...filters, minScore, excludeIds: [] })}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-full text-xs font-semibold uppercase tracking-wide text-muted">
+            Must have
+          </span>
           {TAGS.map((tag: Tag) => (
             <Chip
               key={tag}
@@ -150,31 +166,6 @@ export function TonightPicker({
               }
             >
               {TAG_LABELS[tag]}
-            </Chip>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <span className="w-full text-xs font-semibold uppercase tracking-wide text-muted">
-            Quality bar{" "}
-            <span className="normal-case">
-              (someone {filters.eaterIds.length > 0 ? "eating tonight" : "in the family"} rates it
-              at least…)
-            </span>
-          </span>
-          <Chip
-            active={filters.minScore === 0}
-            onClick={() => setFilters({ ...filters, minScore: 0, excludeIds: [] })}
-          >
-            Anything goes
-          </Chip>
-          {[5, 6, 7, 8].map((n) => (
-            <Chip
-              key={n}
-              active={filters.minScore === n}
-              onClick={() => setFilters({ ...filters, minScore: n, excludeIds: [] })}
-            >
-              {n}+
             </Chip>
           ))}
         </div>

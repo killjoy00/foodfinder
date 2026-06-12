@@ -37,8 +37,21 @@ export function RestaurantForm({
   const [price, setPrice] = useState(initial?.price ?? 2);
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const skipNextSearch = useRef(false);
+
+  async function submit(formData: FormData) {
+    setStatus("saving");
+    try {
+      await action(formData);
+      setStatus("saved");
+    } catch (err) {
+      // server actions that redirect (e.g. after adding) throw internally
+      if (err && typeof err === "object" && "digest" in err) throw err;
+      setStatus("error");
+    }
+  }
 
   useEffect(() => {
     if (skipNextSearch.current) {
@@ -79,7 +92,7 @@ export function RestaurantForm({
     "rounded-xl border border-border-soft bg-surface-2 px-3 py-2.5 outline-none focus:border-accent";
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={submit} className="flex flex-col gap-4">
       <label className="flex flex-col gap-1">
         <span className="text-sm font-semibold text-muted">Name</span>
         <input
@@ -212,9 +225,23 @@ export function RestaurantForm({
       <input type="hidden" name="lat" value={latLng.lat ?? ""} />
       <input type="hidden" name="lng" value={latLng.lng ?? ""} />
 
-      <button type="submit" className="rounded-xl bg-accent px-4 py-3 text-lg font-bold text-black">
-        {submitLabel}
+      <button
+        type="submit"
+        disabled={status === "saving"}
+        className="rounded-xl bg-accent px-4 py-3 text-lg font-bold text-black disabled:opacity-50"
+      >
+        {status === "saving" ? "Saving…" : submitLabel}
       </button>
+      {status === "saved" && (
+        <p className="rounded-xl bg-green-950/60 px-3 py-2 text-center text-sm font-semibold text-green-300">
+          Saved ✓
+        </p>
+      )}
+      {status === "error" && (
+        <p className="rounded-xl bg-red-950/60 px-3 py-2 text-center text-sm font-semibold text-red-300">
+          Something went wrong — try again?
+        </p>
+      )}
     </form>
   );
 }
