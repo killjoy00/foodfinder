@@ -1,0 +1,201 @@
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_FILTERS,
+  buildCandidates,
+  eaterScore,
+  passesFilters,
+  pickTonight,
+  pickWeighted,
+  streakCuisines,
+  weighCandidate,
+  wheelSegments,
+} from "../lib/picker";
+import { RestaurantFull } from "../lib/types";
+
+function restaurant(overrides: Partial<RestaurantFull> = {}): RestaurantFull {
+  return {
+    id: "r1",
+    name: "Test Place",
+    cuisines: ["Mexican"],
+    price: 2,
+    address: null,
+    lat: null,
+    lng: null,
+    googlePlaceId: null,
+    mapsUrl: null,
+    reserveUrl: null,
+    tags: [],
+    status: "active",
+    notes: null,
+    createdAt: "2025-01-01T00:00:00Z",
+    ratings: {},
+    lastVisitAt: null,
+    visitCount: 0,
+    ...overrides,
+  };
+}
+
+const NOW = new Date("2026-06-12T00:00:00Z");
+
+function isoDaysAgo(n: number): string {
+  return new Date(NOW.getTime() - n * 86_400_000).toISOString();
+}
+
+describe("eaterScore", () => {
+  it("averages selected eaters, defaulting unrated eaters to 5", () => {
+    const r = restaurant({ ratings: { a: 9, b: 7 } });
+    expect(eaterScore(r, ["a", "b"])).toBe(8);
+    expect(eaterScore(r, ["a", "c"])).toBe(7); // c unrated -> 5
+  });
+
+  it("falls back to all raters when no eaters selected", () => {
+    expect(eaterScore(restaurant({ ratings: { a: 10, b: 6 } }), [])).toBe(8);
+    expect(eaterScore(restaurant(), [])).toBe(5);
+  });
+});
+
+describe("streakCuisines", () => {
+  it("flags cuisines appearing 2+ times in the last 3 visits", () => {
+    const streaks = streakCuisines([["Mexican"], ["mexican", "Tacos"], ["Italian"]]);
+    expect(streaks.has("mexican")).toBe(true);
+    expect(streaks.has("italian")).toBe(false);
+  });
+
+  it("only looks at the last 3 visits", () => {
+    const streaks = streakCuisines([["Thai"], ["Italian"], ["Sushi"], ["Thai"], ["Thai"]]);
+    expect(streaks.size).toBe(0);
+  });
+});
+
+describe("passesFilters", () => {
+  it("filters by price, cuisine, tags, and exclusions", () => {
+    const r = restaurant({ price: 3, cuisines: ["Italian"], tags: ["patio"] });
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, maxPrice: 2 })).toBe(false);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, cuisines: ["italian"] })).toBe(true);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, cuisines: ["Thai"] })).toBe(false);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, tags: ["patio"] })).toBe(true);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, tags: ["kid_friendly"] })).toBe(false);
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, excludeIds: ["r1"] })).toBe(false);
+  });
+
+  it("requires the takeout tag in takeout mode only for tagged restaurants", () => {
+    const tagged = restaurant({ tags: ["patio"] });
+    const untagged = restaurant({ tags: [] });
+    const takeout = { ...DEFAULT_FILTERS, mode: "takeout" as const };
+    expect(passesFilters(tagged, takeout)).toBe(false);
+    expect(passesFilters(untagged, takeout)).toBe(true);
+  });
+});
+
+describe("weighCandidate", () => {
+  it("boosts places not visited in a long time", () => {
+    const recent = weighCandidate(
+      restaurant({ lastVisitAt: isoDaysAgo(1) }),
+      DEFAULT_FILTERS,
+      new Set(),
+      NOW
+    );
+    const stale = weighCandidate(
+      restaurant({ lastVisitAt: isoDaysAgo(90) }),
+      DEFAULT_FILTERS,
+      new Set(),
+      NOW
+    );
+    expect(stale.weight).toBeGreaterThan(recent.weight * 3);
+    expect(stale.reasons.join(" ")).toContain("haven't been");
+  });
+
+  it("penalizes cuisine streaks", () => {
+    const normal = weighCandidate(restaurant(), DEFAULT_FILTERS, new Set(), NOW);
+    const streaked = weighCandidate(restaurant(), DEFAULT_FILTERS, new Set(["mexican"]), NOW);
+    expect(streaked.weight).toBeCloseTo(normal.weight * 0.25);
+  });
+
+  it("weights higher-rated places more", () => {
+    const loved = weighCandidate(
+      restaurant({ ratings: { a: 10 } }),
+      { ...DEFAULT_FILTERS, eaterIds: ["a"] },
+      new Set(),
+      NOW
+    );
+    const meh = weighCandidate(
+      restaurant({ ratings: { a: 4 } }),
+      { ...DEFAULT_FILTERS, eaterIds: ["a"] },
+      new Set(),
+      NOW
+    );
+    expect(loved.weight).toBeGreaterThan(meh.weight * 5);
+  });
+});
+
+describe("pickWeighted", () => {
+  it("returns null for empty input", () => {
+    expect(pickWeighted([])).toBeNull();
+  });
+
+  it("respects weights deterministically", () => {
+    const items = [
+      { id: "low", weight: 1 },
+      { id: "high", weight: 9 },
+    ];
+    expect(pickWeighted(items, () => 0.05)?.id).toBe("low");
+    expect(pickWeighted(items, () => 0.5)?.id).toBe("high");
+  });
+});
+
+describe("pickTonight", () => {
+  const pool = [
+    restaurant({ id: "a", name: "A", status: "active", lastVisitAt: isoDaysAgo(10) }),
+    restaurant({ id: "b", name: "B", status: "active", lastVisitAt: isoDaysAgo(40) }),
+    restaurant({ id: "w", name: "W", status: "wishlist", cuisines: ["Thai"] }),
+  ];
+
+  it("picks from the wishlist when the wishlist die hits", () => {
+    // first rng call is the wishlist roll: 0.1*100=10 < 50
+    const rolls = [0.1, 0.5];
+    let i = 0;
+    const rng = () => rolls[i++ % rolls.length];
+    const picked = pickTonight(pool, { ...DEFAULT_FILTERS, wishlistPercent: 50 }, [], rng, NOW);
+    expect(picked?.restaurant.id).toBe("w");
+  });
+
+  it("never picks wishlist at 0%", () => {
+    for (let seed = 0; seed < 20; seed++) {
+      const rng = () => ((seed * 9301 + 49297) % 233280) / 233280;
+      const picked = pickTonight(pool, { ...DEFAULT_FILTERS, wishlistPercent: 0 }, [], rng, NOW);
+      expect(picked?.restaurant.status).toBe("active");
+    }
+  });
+
+  it("falls back to regulars when filters empty the wishlist", () => {
+    const picked = pickTonight(
+      pool,
+      { ...DEFAULT_FILTERS, wishlistPercent: 100, cuisines: ["Mexican"] },
+      [],
+      () => 0.01,
+      NOW
+    );
+    expect(picked?.restaurant.status).toBe("active");
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(
+      pickTonight(pool, { ...DEFAULT_FILTERS, cuisines: ["Ethiopian"] }, [], Math.random, NOW)
+    ).toBeNull();
+  });
+});
+
+describe("wheelSegments", () => {
+  it("always contains the winner and caps the size", () => {
+    const all = buildCandidates(
+      Array.from({ length: 15 }, (_, i) => restaurant({ id: `r${i}`, name: `R${i}` })),
+      DEFAULT_FILTERS,
+      [],
+      NOW
+    ).regulars;
+    const winner = all[7];
+    const segments = wheelSegments(winner, all, 8, () => 0.4);
+    expect(segments).toHaveLength(8);
+    expect(segments.some((s) => s.restaurant.id === winner.restaurant.id)).toBe(true);
+  });
+});
