@@ -3,6 +3,8 @@ import { addProfileAction, selectProfileAction } from "@/app/actions";
 import { isAuthed } from "@/lib/auth";
 import { db } from "@/lib/data";
 
+export const dynamic = "force-dynamic";
+
 const PROFILE_COLORS = ["#f97316", "#3b82f6", "#22c55e", "#a855f7", "#ec4899", "#eab308"];
 
 export default async function ProfilesPage() {
