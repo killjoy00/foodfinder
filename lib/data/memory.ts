@@ -260,6 +260,13 @@ export class MemoryAdapter implements DataAdapter {
     return store().voteSessions.find((v) => v.status === "open") ?? null;
   }
 
+  async getLatestVoteSession(): Promise<VoteSession | null> {
+    const sessions = [...store().voteSessions].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+    return sessions[0] ?? null;
+  }
+
   async getVoteSession(id: string): Promise<VoteSession | null> {
     return store().voteSessions.find((v) => v.id === id) ?? null;
   }

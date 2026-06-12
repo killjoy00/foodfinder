@@ -228,6 +228,18 @@ export class SupabaseAdapter implements DataAdapter {
     return row ? rowToSession(row) : null;
   }
 
+  async getLatestVoteSession(): Promise<VoteSession | null> {
+    const row = await this.unwrap(
+      this.client
+        .from("vote_sessions")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
+    return row ? rowToSession(row) : null;
+  }
+
   async getVoteSession(id: string): Promise<VoteSession | null> {
     const row = await this.unwrap(
       this.client.from("vote_sessions").select("*").eq("id", id).maybeSingle()

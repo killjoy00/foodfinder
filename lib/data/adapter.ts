@@ -38,6 +38,7 @@ export interface DataAdapter {
   // family vote
   createVoteSession(candidateIds: string[]): Promise<VoteSession>;
   getOpenVoteSession(): Promise<VoteSession | null>;
+  getLatestVoteSession(): Promise<VoteSession | null>;
   getVoteSession(id: string): Promise<VoteSession | null>;
   listVotes(sessionId: string): Promise<Vote[]>;
   castVote(sessionId: string, profileId: string, pickId: string | null, vetoId: string | null): Promise<void>;
