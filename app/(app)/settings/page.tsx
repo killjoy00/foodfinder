@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { deleteProfileAction, saveSettingsAction, updateProfileAction } from "@/app/actions";
+import { deleteProfileAction, updateProfileAction } from "@/app/actions";
+import { LocationForm } from "@/components/LocationForm";
 import { ProfileEditor } from "@/components/ProfileEditor";
 import { passwordRequired } from "@/lib/auth";
 import { db, isDemoMode } from "@/lib/data";
@@ -9,8 +10,6 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const [settings, profiles] = await Promise.all([db().getSettings(), db().listProfiles()]);
-  const inputCls =
-    "rounded-xl border border-border-soft bg-surface-2 px-3 py-2.5 outline-none focus:border-accent";
 
   return (
     <div className="flex flex-col gap-5 pt-2">
@@ -19,52 +18,9 @@ export default async function SettingsPage() {
       <section className="flex flex-col gap-3 rounded-2xl border border-border-soft bg-surface p-4">
         <h2 className="font-bold">Home location</h2>
         <p className="text-sm text-muted">
-          Used by the discovery sweep and recommendations. Find your coordinates by long-pressing
-          your home on Google Maps.
+          Used by the discovery sweep and recommendations — just a ZIP code is fine.
         </p>
-        <form action={saveSettingsAction} className="flex flex-col gap-3">
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-semibold text-muted">Label</span>
-            <input
-              name="homeLabel"
-              defaultValue={settings.homeLabel ?? ""}
-              placeholder="Home"
-              className={inputCls}
-            />
-          </label>
-          <div className="flex gap-3">
-            <label className="flex flex-1 flex-col gap-1 text-sm">
-              <span className="font-semibold text-muted">Latitude</span>
-              <input
-                name="homeLat"
-                defaultValue={settings.homeLat ?? ""}
-                placeholder="37.7749"
-                inputMode="decimal"
-                className={inputCls}
-              />
-            </label>
-            <label className="flex flex-1 flex-col gap-1 text-sm">
-              <span className="font-semibold text-muted">Longitude</span>
-              <input
-                name="homeLng"
-                defaultValue={settings.homeLng ?? ""}
-                placeholder="-122.4194"
-                inputMode="decimal"
-                className={inputCls}
-              />
-            </label>
-          </div>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-semibold text-muted">Search radius (miles)</span>
-            <input
-              name="radiusMiles"
-              defaultValue={(settings.radiusMeters / 1609.34).toFixed(1)}
-              inputMode="decimal"
-              className={inputCls}
-            />
-          </label>
-          <button className="rounded-xl bg-accent px-4 py-2.5 font-bold text-black">Save</button>
-        </form>
+        <LocationForm settings={settings} />
       </section>
 
       <section className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-surface p-4">

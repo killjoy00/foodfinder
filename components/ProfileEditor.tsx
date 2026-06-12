@@ -7,9 +7,9 @@ export const PROFILE_EMOJI = [
   "😀", "😎", "🥳", "🤠", "🤓", "😇",
   "🦊", "🐻", "🐼", "🐸", "🦄", "🐯",
   "🦁", "🐨", "🐷", "🐙", "🦖", "🐢",
-  "🦋", "🐝", "🦉", "🐬", "🦈", "🐺",
-  "🍕", "🌮", "🍣", "🍜", "🍩", "🧁",
-  "🍓", "🥑", "🍔", "⚽", "🎸", "🚀",
+  "🦥", "🦏", "🦋", "🐝", "🦉", "🐬",
+  "🦈", "🐺", "🍕", "🌮", "🍣", "🍜",
+  "🍩", "🧁", "🍓", "🥑", "🍔", "⚽",
 ];
 
 export const PROFILE_COLORS = [
@@ -30,9 +30,22 @@ export function ProfileEditor({
   const [name, setName] = useState(initial?.name ?? "");
   const [emoji, setEmoji] = useState(initial?.emoji ?? PROFILE_EMOJI[0]);
   const [color, setColor] = useState(initial?.color ?? PROFILE_COLORS[0]);
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  async function submit(formData: FormData) {
+    setStatus("saving");
+    try {
+      await action(formData);
+      setStatus("saved");
+    } catch (err) {
+      // server actions that redirect throw internally — let those through
+      if (err && typeof err === "object" && "digest" in err) throw err;
+      setStatus("error");
+    }
+  }
 
   return (
-    <form action={action} className="flex flex-col gap-4">
+    <form action={submit} className="flex flex-col gap-4">
       <input type="hidden" name="emoji" value={emoji} />
       <input type="hidden" name="color" value={color} />
 
@@ -96,11 +109,21 @@ export function ProfileEditor({
 
       <button
         type="submit"
-        disabled={!name.trim()}
+        disabled={!name.trim() || status === "saving"}
         className="rounded-xl bg-accent px-4 py-2.5 font-bold text-black disabled:opacity-40"
       >
-        {submitLabel}
+        {status === "saving" ? "Saving…" : submitLabel}
       </button>
+      {status === "saved" && (
+        <p className="rounded-xl bg-green-950/60 px-3 py-2 text-center text-sm font-semibold text-green-300">
+          Saved ✓
+        </p>
+      )}
+      {status === "error" && (
+        <p className="rounded-xl bg-red-950/60 px-3 py-2 text-center text-sm font-semibold text-red-300">
+          Something went wrong — try again?
+        </p>
+      )}
     </form>
   );
 }

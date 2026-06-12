@@ -100,3 +100,89 @@ export function parseTakeout(jsonText: string): TakeoutItem[] {
 export function starToScore(star: number): number {
   return Math.max(1, Math.min(10, Math.round(star * 2)));
 }
+
+// ---------- Takeout "Saved" lists (CSV per list: Title,Note,URL[,Comment]) ----------
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(field);
+      field = "";
+    } else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(field);
+      field = "";
+      if (row.some((f) => f !== "")) rows.push(row);
+      row = [];
+    } else {
+      field += ch;
+    }
+  }
+  row.push(field);
+  if (row.some((f) => f !== "")) rows.push(row);
+  return rows;
+}
+
+export function parseTakeoutCsv(csvText: string): TakeoutItem[] {
+  const rows = parseCsv(csvText);
+  if (rows.length === 0) {
+    throw new Error("That CSV looks empty.");
+  }
+  const header = rows[0].map((h) => h.trim().toLowerCase());
+  const titleIdx = header.indexOf("title");
+  const urlIdx = header.indexOf("url");
+  if (titleIdx === -1) {
+    throw new Error(
+      "Couldn't find a Title column. Expected a list CSV from Takeout's “Saved” export (Title,Note,URL)."
+    );
+  }
+  const items: TakeoutItem[] = [];
+  const seen = new Set<string>();
+  for (const row of rows.slice(1)) {
+    const name = (row[titleIdx] ?? "").trim();
+    if (!name) continue;
+    const mapsUrl = urlIdx >= 0 ? (row[urlIdx] ?? "").trim() || null : null;
+    const key = (mapsUrl ?? name).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push({
+      name,
+      address: null,
+      lat: null,
+      lng: null,
+      mapsUrl,
+      placeId: placeIdFromUrl(mapsUrl),
+      starRating: null,
+      kind: "saved",
+      date: null,
+    });
+  }
+  return items;
+}
+
+/** Accepts either Takeout format: GeoJSON (Maps your places) or CSV (Saved lists). */
+export function parseTakeoutAny(text: string, filename = ""): TakeoutItem[] {
+  const trimmed = text.trimStart();
+  if (filename.toLowerCase().endsWith(".csv") || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+    return parseTakeoutCsv(text);
+  }
+  return parseTakeout(text);
+}

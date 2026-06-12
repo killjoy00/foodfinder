@@ -11,6 +11,7 @@ import {
   buildCandidates,
   sampleCandidates,
 } from "@/lib/picker";
+import { zipToCoords } from "@/lib/geocode";
 import { findRecommendations } from "@/lib/recommend";
 import { placesKey } from "@/lib/places";
 import { runDiscoverySweep, SweepResult } from "@/lib/sweep";
@@ -365,18 +366,45 @@ export async function importTakeoutAction(
 
 // ---------- settings ----------
 
-export async function saveSettingsAction(formData: FormData): Promise<void> {
+export async function saveLocationAction(
+  _prev: { ok: boolean; message: string } | null,
+  formData: FormData
+): Promise<{ ok: boolean; message: string }> {
   await requireProfile();
   const num = (name: string) => {
     const v = parseFloat(String(formData.get(name) ?? ""));
     return Number.isFinite(v) ? v : null;
   };
-  const settings: Settings = {
-    homeLabel: String(formData.get("homeLabel") ?? "").trim() || null,
-    homeLat: num("homeLat"),
-    homeLng: num("homeLng"),
-    radiusMeters: Math.round(((num("radiusMiles") ?? 5) * 1609.34) || 8000),
-  };
+  const radiusMeters = Math.round(((num("radiusMiles") ?? 5) * 1609.34) || 8000);
+  const zip = String(formData.get("zip") ?? "").trim();
+  const manualLat = num("homeLat");
+  const manualLng = num("homeLng");
+
+  let settings: Settings;
+  if (zip) {
+    const hit = await zipToCoords(zip);
+    if (!hit) {
+      return { ok: false, message: `Couldn't find ZIP code "${zip}" — double-check it?` };
+    }
+    settings = {
+      homeLabel: `${hit.label} (${zip})`,
+      homeLat: hit.lat,
+      homeLng: hit.lng,
+      radiusMeters,
+    };
+  } else if (manualLat !== null && manualLng !== null) {
+    settings = {
+      homeLabel: String(formData.get("homeLabel") ?? "").trim() || "Home",
+      homeLat: manualLat,
+      homeLng: manualLng,
+      radiusMeters,
+    };
+  } else {
+    return { ok: false, message: "Enter a ZIP code (or coordinates under Advanced)." };
+  }
+
   await db().saveSettings(settings);
   revalidatePath("/settings");
+  revalidatePath("/discover");
+  return { ok: true, message: `Home set to ${settings.homeLabel} ✓` };
 }

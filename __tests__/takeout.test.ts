@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTakeout, starToScore } from "../lib/takeout";
+import { parseTakeout, parseTakeoutAny, parseTakeoutCsv, starToScore } from "../lib/takeout";
 
 const SAVED_PLACES = JSON.stringify({
   type: "FeatureCollection",
@@ -94,6 +94,37 @@ describe("parseTakeout", () => {
   it("throws a friendly error on garbage input", () => {
     expect(() => parseTakeout("not json")).toThrow(/isn't valid JSON/);
     expect(() => parseTakeout('{"foo": 1}')).toThrow(/Couldn't find any places/);
+  });
+});
+
+describe("parseTakeoutCsv", () => {
+  const CSV = `Title,Note,URL,Comment
+"Tasty Corner","","https://www.google.com/maps/place/?q=place_id:ChIJxyz789",""
+"Commas, Quotes ""& Co""","note","https://maps.google.com/?cid=55",""
+"Tasty Corner","dupe","https://www.google.com/maps/place/?q=place_id:ChIJxyz789",""
+`;
+
+  it("parses Saved-list CSVs with quoting and dedupes by URL", () => {
+    const items = parseTakeoutCsv(CSV);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      name: "Tasty Corner",
+      kind: "saved",
+      placeId: "ChIJxyz789",
+    });
+    expect(items[1].name).toBe('Commas, Quotes "& Co"');
+  });
+
+  it("throws a friendly error without a Title column", () => {
+    expect(() => parseTakeoutCsv("foo,bar\n1,2\n")).toThrow(/Title column/);
+  });
+});
+
+describe("parseTakeoutAny", () => {
+  it("routes by content/filename", () => {
+    expect(parseTakeoutAny(SAVED_PLACES, "Saved Places.json")).toHaveLength(2);
+    expect(parseTakeoutAny('Title,Note,URL\n"A Place","",""\n', "Favorites.csv")).toHaveLength(1);
+    expect(parseTakeoutAny('Title,Note,URL\n"A Place","",""\n')).toHaveLength(1);
   });
 });
 

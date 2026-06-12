@@ -52,8 +52,8 @@ new-restaurant feed, and recommendations.
    (Billing → Budgets & alerts).
 5. In Vercel: **Project → Settings → Environment Variables** → add
    `GOOGLE_PLACES_API_KEY`, then **Deployments → ⋯ → Redeploy**.
-6. In the app: **Settings → Home location** — enter your home latitude /
-   longitude (long-press your house on Google Maps to see them) and a radius.
+6. In the app: **Settings → Home location** — enter your ZIP code and a
+   radius (exact coordinates also work, under "Advanced").
 
 ## 4. Put it on everyone's phone (1 min each)
 
@@ -66,12 +66,16 @@ It behaves like a native app from then on; the login sticks for a year.
 
 ## 5. Seed your restaurants
 
-Fastest path: **Settings → Import from Google Takeout**. Export
-"Maps (your places)" at <https://takeout.google.com>, then upload
-`Reviews.json` (your rated places, ratings come along) and
-`Saved Places.json` (goes to the wishlist). Untick non-restaurants in the
-preview. Then spend five minutes adding cuisines/prices to your top spots —
-the picker gets smarter with every rating and visit you log.
+Fastest path: **Settings → Import from Google Takeout**. At
+<https://takeout.google.com>, click "Deselect all", then tick exactly two
+items in the alphabetical product list: **"Maps (your places)"** (under M,
+right after "Maps" — contains `Reviews.json` and `Saved Places.json`) and
+**"Saved"** (under S — contains one CSV per saved list, like
+`Favorites.csv` and `Want to go.csv`). Export, unzip, and upload any of
+those files in the app: reviews become "Been there" with your ratings;
+saved places and list CSVs go to the wishlist. Untick non-restaurants in
+the preview. Then spend five minutes adding cuisines/prices to your top
+spots — the picker gets smarter with every rating and visit you log.
 
 ## Troubleshooting
 

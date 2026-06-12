@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { importTakeoutAction } from "@/app/actions";
-import { TakeoutItem, parseTakeout } from "@/lib/takeout";
+import { TakeoutItem, parseTakeoutAny } from "@/lib/takeout";
 
 export function ImportClient() {
   const [items, setItems] = useState<TakeoutItem[] | null>(null);
@@ -15,7 +15,7 @@ export function ImportClient() {
     setError(null);
     setResult(null);
     try {
-      const parsed = parseTakeout(await file.text());
+      const parsed = parseTakeoutAny(await file.text(), file.name);
       if (parsed.length === 0) {
         setError("No places found in that file.");
         return;
@@ -54,17 +54,24 @@ export function ImportClient() {
             >
               takeout.google.com
             </a>{" "}
-            and export only <strong>Maps (your places)</strong>.
+            and click <strong>Deselect all</strong>.
           </li>
-          <li>Unzip the download.</li>
           <li>
-            Upload <strong>Reviews.json</strong> (rated places → “Been there” with your rating) and/or{" "}
-            <strong>Saved Places.json</strong> (→ wishlist).
+            Tick <strong>“Maps (your places)”</strong> (it&apos;s in the alphabetical list under M,
+            just after “Maps” — use your browser&apos;s find-on-page if needed). For your saved
+            lists, also tick <strong>“Saved”</strong> (under S).
+          </li>
+          <li>Next step → Export once → Create export, then unzip the download.</li>
+          <li>
+            Upload here: <strong>Reviews.json</strong> (your rated places → “Been there” with
+            ratings), <strong>Saved Places.json</strong> (→ wishlist), and/or any list CSV from the
+            Saved folder like <strong>Favorites.csv</strong> or <strong>Want to go.csv</strong> (→
+            wishlist).
           </li>
         </ol>
         <input
           type="file"
-          accept=".json,application/json"
+          accept=".json,.csv,application/json,text/csv"
           onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
           className="rounded-xl border border-border-soft bg-surface-2 p-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:font-semibold file:text-black"
         />
