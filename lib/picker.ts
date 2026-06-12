@@ -1,5 +1,8 @@
 import { RestaurantFull, daysSince } from "./types";
 
+export const DEFAULT_VOTE_SIZE = 4;
+export const VOTE_SIZE_CHOICES = [2, 3, 4, 5, 6];
+
 export type PickerFilters = {
   cuisines: string[]; // empty = any
   maxPrice: number; // 1-4
@@ -145,6 +148,23 @@ export function pickTonight(
   const useWishlist =
     wishlist.length > 0 && (regulars.length === 0 || rng() * 100 < filters.wishlistPercent);
   return pickWeighted(useWishlist ? wishlist : regulars, rng) ?? pickWeighted(regulars, rng);
+}
+
+/** Weighted sample of up to `count` distinct candidates (for family votes). */
+export function sampleCandidates(
+  pool: WeightedCandidate[],
+  count: number,
+  rng: () => number = Math.random
+): WeightedCandidate[] {
+  const remaining = pool.filter((c) => c.weight > 0);
+  const sampled: WeightedCandidate[] = [];
+  while (sampled.length < count && remaining.length > 0) {
+    const pick = pickWeighted(remaining, rng);
+    if (!pick) break;
+    sampled.push(pick);
+    remaining.splice(remaining.indexOf(pick), 1);
+  }
+  return sampled;
 }
 
 /**

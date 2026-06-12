@@ -6,6 +6,7 @@ import {
   passesFilters,
   pickTonight,
   pickWeighted,
+  sampleCandidates,
   streakCuisines,
   weighCandidate,
   wheelSegments,
@@ -182,6 +183,28 @@ describe("pickTonight", () => {
     expect(
       pickTonight(pool, { ...DEFAULT_FILTERS, cuisines: ["Ethiopian"] }, [], Math.random, NOW)
     ).toBeNull();
+  });
+});
+
+describe("sampleCandidates", () => {
+  const pool = buildCandidates(
+    Array.from({ length: 10 }, (_, i) => restaurant({ id: `r${i}`, name: `R${i}` })),
+    DEFAULT_FILTERS,
+    [],
+    NOW
+  ).regulars;
+
+  it("returns the requested number of distinct candidates", () => {
+    const sampled = sampleCandidates(pool, 4, () => 0.42);
+    expect(sampled).toHaveLength(4);
+    expect(new Set(sampled.map((c) => c.restaurant.id)).size).toBe(4);
+  });
+
+  it("caps at the pool size and skips zero-weight candidates", () => {
+    const tiny = sampleCandidates(pool.slice(0, 2), 6);
+    expect(tiny).toHaveLength(2);
+    const zeroed = pool.map((c) => ({ ...c, weight: 0 }));
+    expect(sampleCandidates(zeroed, 3)).toHaveLength(0);
   });
 });
 

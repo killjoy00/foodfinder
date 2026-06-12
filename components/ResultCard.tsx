@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { WeightedCandidate } from "@/lib/picker";
+import { DEFAULT_VOTE_SIZE, VOTE_SIZE_CHOICES, WeightedCandidate } from "@/lib/picker";
 import { PRICE_LABELS, Profile, VisitMode, daysSince, mapsLink, openTableLink } from "@/lib/types";
 
 export function ResultCard({
@@ -12,18 +12,22 @@ export function ResultCard({
   onLog,
   onReroll,
   onStartVote,
+  maxVoteSize,
 }: {
   candidate: WeightedCandidate;
   profiles: Profile[];
   logged: boolean;
   onLog: (mode: VisitMode) => Promise<void>;
   onReroll: () => void;
-  onStartVote: () => void;
+  onStartVote: (count: number) => void;
+  maxVoteSize: number;
 }) {
   const r = candidate.restaurant;
   const [pending, startTransition] = useTransition();
   const [mode, setMode] = useState<VisitMode>("dine_in");
+  const [choosingVoteSize, setChoosingVoteSize] = useState(false);
   const days = daysSince(r.lastVisitAt);
+  const voteSizes = VOTE_SIZE_CHOICES.filter((n) => n <= maxVoteSize);
 
   return (
     <section className="pop-in flex flex-col gap-4 rounded-2xl border-2 border-accent bg-surface p-5 shadow-xl">
@@ -117,20 +121,48 @@ export function ResultCard({
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button
-          onClick={onReroll}
-          className="flex-1 rounded-xl border border-border-soft px-4 py-2 font-semibold text-muted"
-        >
-          😒 Nope, spin again
-        </button>
-        <button
-          onClick={onStartVote}
-          className="flex-1 rounded-xl border border-border-soft px-4 py-2 font-semibold text-muted"
-        >
-          🗳️ Let the family vote
-        </button>
-      </div>
+      {choosingVoteSize ? (
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-muted">How many options?</span>
+          {voteSizes.map((n) => (
+            <button
+              key={n}
+              onClick={() => onStartVote(n)}
+              className={`h-10 flex-1 rounded-xl border font-bold ${
+                n === DEFAULT_VOTE_SIZE
+                  ? "border-accent bg-accent-soft text-orange-200"
+                  : "border-border-soft text-muted"
+              }`}
+            >
+              {n}
+            </button>
+          ))}
+          <button
+            onClick={() => setChoosingVoteSize(false)}
+            className="rounded-xl border border-border-soft px-3 py-2 text-muted"
+            title="Never mind"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={onReroll}
+            className="flex-1 rounded-xl border border-border-soft px-4 py-2 font-semibold text-muted"
+          >
+            😒 Nope, spin again
+          </button>
+          <button
+            onClick={() =>
+              voteSizes.length > 1 ? setChoosingVoteSize(true) : onStartVote(DEFAULT_VOTE_SIZE)
+            }
+            className="flex-1 rounded-xl border border-border-soft px-4 py-2 font-semibold text-muted"
+          >
+            🗳️ Let the family vote
+          </button>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { db } from "@/lib/data";
+import { QuickVoteStart } from "@/components/QuickVoteStart";
 import { VotePanel, VoteWinnerView } from "@/components/VotePanel";
 
 export const dynamic = "force-dynamic";
@@ -26,16 +27,18 @@ export default async function VotePage() {
         );
       }
     }
+    const restaurants = await db().listRestaurants();
     return (
-      <div className="flex flex-col items-center gap-4 pt-16 text-center">
+      <div className="flex flex-col items-center gap-4 pt-10 text-center">
         <span className="text-5xl">🗳️</span>
         <h1 className="text-2xl font-bold">No vote running</h1>
         <p className="max-w-sm text-muted">
-          Spin the wheel on the Tonight tab and tap “Let the family vote” to put three options up
-          for a family decision. Everyone picks a favorite — and everyone gets one veto.
+          Put some options up for a family decision. Everyone picks a favorite — and everyone gets
+          one veto.
         </p>
-        <Link href="/" className="rounded-xl bg-accent px-5 py-3 font-bold text-black">
-          🎲 Go to Tonight
+        <QuickVoteStart available={restaurants.length} />
+        <Link href="/" className="text-sm text-accent underline">
+          or spin the wheel on Tonight first →
         </Link>
       </div>
     );

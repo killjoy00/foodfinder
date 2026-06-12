@@ -7,7 +7,7 @@ import {
   WeightedCandidate,
   buildCandidates,
   pickTonight,
-  pickWeighted,
+  sampleCandidates,
   wheelSegments,
 } from "@/lib/picker";
 import { Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
@@ -62,16 +62,8 @@ export function TonightPicker({
     return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
   }
 
-  function startVote() {
-    const pool = [...regulars, ...wishlist].filter((c) => c.weight > 0);
-    const candidates: WeightedCandidate[] = [];
-    const remaining = [...pool];
-    while (candidates.length < 3 && remaining.length > 0) {
-      const pick = pickWeighted(remaining);
-      if (!pick) break;
-      candidates.push(pick);
-      remaining.splice(remaining.indexOf(pick), 1);
-    }
+  function startVote(count: number) {
+    const candidates = sampleCandidates([...regulars, ...wishlist], count);
     if (candidates.length >= 2) {
       startVoteTransition(() => startVoteAction(candidates.map((c) => c.restaurant.id)));
     }
@@ -210,6 +202,7 @@ export function TonightPicker({
           }}
           onReroll={() => spin(winner.restaurant.id)}
           onStartVote={startVote}
+          maxVoteSize={eligibleCount}
         />
       )}
     </div>

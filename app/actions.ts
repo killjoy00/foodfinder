@@ -5,6 +5,12 @@ import { redirect } from "next/navigation";
 import { clearActiveProfile, login, requireProfile, setActiveProfile } from "@/lib/auth";
 import { db } from "@/lib/data";
 import { NewRestaurant } from "@/lib/data/adapter";
+import {
+  DEFAULT_FILTERS,
+  DEFAULT_VOTE_SIZE,
+  buildCandidates,
+  sampleCandidates,
+} from "@/lib/picker";
 import { findRecommendations } from "@/lib/recommend";
 import { placesKey } from "@/lib/places";
 import { runDiscoverySweep, SweepResult } from "@/lib/sweep";
@@ -146,9 +152,29 @@ export async function logVisitAction(
 export async function startVoteAction(candidateIds: string[]): Promise<void> {
   await requireProfile();
   if (candidateIds.length < 2) return;
-  await db().createVoteSession(candidateIds.slice(0, 4));
+  await db().createVoteSession(candidateIds.slice(0, 8));
   revalidatePath("/vote");
   redirect("/vote");
+}
+
+/**
+ * Start a vote straight from the Vote tab: weighted-sample candidates
+ * from the whole collection using default filters.
+ */
+export async function startQuickVoteAction(count: number): Promise<void> {
+  await requireProfile();
+  const size = Math.min(8, Math.max(2, Math.round(count) || DEFAULT_VOTE_SIZE));
+  const [restaurants, recentVisits] = await Promise.all([
+    db().listRestaurants(),
+    db().listRecentVisits(3),
+  ]);
+  const byId = new Map(restaurants.map((r) => [r.id, r]));
+  const recentCuisines = recentVisits.map((v) => byId.get(v.restaurantId)?.cuisines ?? []);
+  const { regulars, wishlist } = buildCandidates(restaurants, DEFAULT_FILTERS, recentCuisines);
+  const candidates = sampleCandidates([...regulars, ...wishlist], size);
+  if (candidates.length < 2) return;
+  await db().createVoteSession(candidates.map((c) => c.restaurant.id));
+  revalidatePath("/vote");
 }
 
 export async function castVoteAction(
