@@ -14,9 +14,9 @@ import { ConfirmDelete } from "@/components/ConfirmDelete";
 export default async function RestaurantPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [restaurant, profiles, visits] = await Promise.all([
-    db().getRestaurant(id),
-    db().listProfiles(),
-    db().listVisitsForRestaurant(id),
+    (await db()).getRestaurant(id),
+    (await db()).listProfiles(),
+    (await db()).listVisitsForRestaurant(id),
   ]);
   if (!restaurant) notFound();
 

@@ -2,6 +2,7 @@ import { SupabaseClient, createClient } from "@supabase/supabase-js";
 import {
   DEFAULT_SETTINGS,
   Discovery,
+  Household,
   Profile,
   Restaurant,
   RestaurantFull,
@@ -11,12 +12,14 @@ import {
   Vote,
   VoteSession,
 } from "../types";
-import { DataAdapter, DiscoveryInput, NewRestaurant } from "./adapter";
+import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewRestaurant } from "./adapter";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>;
 
-function rowToRestaurant(row: Row): Restaurant {
+type Catalog = Omit<Restaurant, "status" | "notes">;
+
+function rowToCatalog(row: Row): Catalog {
   return {
     id: row.id,
     name: row.name,
@@ -29,13 +32,24 @@ function rowToRestaurant(row: Row): Restaurant {
     mapsUrl: row.maps_url,
     reserveUrl: row.reserve_url,
     tags: row.tags ?? [],
-    status: row.status,
-    notes: row.notes,
     createdAt: row.created_at,
   };
 }
 
-function restaurantToRow(data: Partial<NewRestaurant>): Row {
+const CATALOG_KEYS: (keyof NewRestaurant)[] = [
+  "name",
+  "cuisines",
+  "price",
+  "address",
+  "lat",
+  "lng",
+  "googlePlaceId",
+  "mapsUrl",
+  "reserveUrl",
+  "tags",
+];
+
+function catalogToRow(data: Partial<NewRestaurant>): Row {
   const row: Row = {};
   if (data.name !== undefined) row.name = data.name;
   if (data.cuisines !== undefined) row.cuisines = data.cuisines;
@@ -47,19 +61,15 @@ function restaurantToRow(data: Partial<NewRestaurant>): Row {
   if (data.mapsUrl !== undefined) row.maps_url = data.mapsUrl;
   if (data.reserveUrl !== undefined) row.reserve_url = data.reserveUrl;
   if (data.tags !== undefined) row.tags = data.tags;
-  if (data.status !== undefined) row.status = data.status;
-  if (data.notes !== undefined) row.notes = data.notes;
   return row;
 }
 
+function hasCatalogChange(data: Partial<NewRestaurant>): boolean {
+  return CATALOG_KEYS.some((k) => data[k] !== undefined);
+}
+
 function rowToVisit(row: Row): Visit {
-  return {
-    id: row.id,
-    restaurantId: row.restaurant_id,
-    date: row.date,
-    mode: row.mode,
-    note: row.note,
-  };
+  return { id: row.id, restaurantId: row.restaurant_id, date: row.date, mode: row.mode, note: row.note };
 }
 
 function rowToSession(row: Row): VoteSession {
@@ -72,24 +82,72 @@ function rowToSession(row: Row): VoteSession {
   };
 }
 
+function makeClient(url: string, key: string): SupabaseClient {
+  return createClient(url, key, { auth: { persistSession: false } });
+}
+
+async function unwrap<T>(p: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+  const { data, error } = await p;
+  if (error) throw new Error(`Database error: ${error.message}`);
+  return data;
+}
+
+export class SupabaseRegistry implements HouseholdRegistry {
+  private client: SupabaseClient;
+  constructor(url: string, key: string) {
+    this.client = makeClient(url, key);
+  }
+  async createHousehold(name: string, passwordHash: string): Promise<Household> {
+    const row = await unwrap(
+      this.client
+        .from("households")
+        .insert({ name, name_key: name.trim().toLowerCase(), password_hash: passwordHash })
+        .select()
+        .single()
+    );
+    return { id: row.id, name: row.name };
+  }
+  async findHouseholdByName(name: string): Promise<HouseholdAuth | null> {
+    const row = await unwrap(
+      this.client
+        .from("households")
+        .select("id, name, password_hash")
+        .eq("name_key", name.trim().toLowerCase())
+        .maybeSingle()
+    );
+    return row ? { id: row.id, name: row.name, passwordHash: row.password_hash } : null;
+  }
+  async getHousehold(id: string): Promise<Household | null> {
+    const row = await unwrap(
+      this.client.from("households").select("id, name").eq("id", id).maybeSingle()
+    );
+    return row ? { id: row.id, name: row.name } : null;
+  }
+  async listHouseholds(): Promise<Household[]> {
+    const rows = await unwrap(this.client.from("households").select("id, name"));
+    return (rows ?? []).map((r: Row) => ({ id: r.id, name: r.name }));
+  }
+}
+
 export class SupabaseAdapter implements DataAdapter {
   private client: SupabaseClient;
-
-  constructor(url: string, serviceRoleKey: string) {
-    this.client = createClient(url, serviceRoleKey, {
-      auth: { persistSession: false },
-    });
+  constructor(url: string, key: string, private hid: string) {
+    this.client = makeClient(url, key);
   }
+  private unwrap = unwrap;
 
-  private async unwrap<T>(promise: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
-    const { data, error } = await promise;
-    if (error) throw new Error(`Database error: ${error.message}`);
-    return data;
+  private async memberIds(): Promise<string[]> {
+    const rows = await unwrap(this.client.from("profiles").select("id").eq("household_id", this.hid));
+    return (rows ?? []).map((r: Row) => r.id);
   }
 
   async listProfiles(): Promise<Profile[]> {
-    const rows = await this.unwrap(
-      this.client.from("profiles").select("*").order("created_at", { ascending: true })
+    const rows = await unwrap(
+      this.client
+        .from("profiles")
+        .select("*")
+        .eq("household_id", this.hid)
+        .order("created_at", { ascending: true })
     );
     return (rows ?? []).map((r: Row) => ({
       id: r.id,
@@ -101,16 +159,14 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async createProfile(name: string, emoji: string, color: string): Promise<Profile> {
-    const row = await this.unwrap(
-      this.client.from("profiles").insert({ name, emoji, color }).select().single()
+    const row = await unwrap(
+      this.client
+        .from("profiles")
+        .insert({ household_id: this.hid, name, emoji, color })
+        .select()
+        .single()
     );
     return { id: row.id, name: row.name, emoji: row.emoji, color: row.color, doubleCredits: 0 };
-  }
-
-  async setDoubleCredits(profileId: string, credits: number): Promise<void> {
-    await this.unwrap(
-      this.client.from("profiles").update({ double_credits: Math.max(0, credits) }).eq("id", profileId)
-    );
   }
 
   async updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void> {
@@ -118,29 +174,56 @@ export class SupabaseAdapter implements DataAdapter {
     if (data.name !== undefined) row.name = data.name;
     if (data.emoji !== undefined) row.emoji = data.emoji;
     if (data.color !== undefined) row.color = data.color;
-    await this.unwrap(this.client.from("profiles").update(row).eq("id", id));
+    if (data.doubleCredits !== undefined) row.double_credits = data.doubleCredits;
+    await unwrap(this.client.from("profiles").update(row).eq("id", id).eq("household_id", this.hid));
+  }
+
+  async setDoubleCredits(profileId: string, credits: number): Promise<void> {
+    await unwrap(
+      this.client
+        .from("profiles")
+        .update({ double_credits: Math.max(0, credits) })
+        .eq("id", profileId)
+        .eq("household_id", this.hid)
+    );
   }
 
   async deleteProfile(id: string): Promise<void> {
-    await this.unwrap(this.client.from("profiles").delete().eq("id", id));
+    await unwrap(this.client.from("profiles").delete().eq("id", id).eq("household_id", this.hid));
   }
 
-  private async enrichAll(restaurants: Restaurant[]): Promise<RestaurantFull[]> {
-    if (restaurants.length === 0) return [];
-    const ids = restaurants.map((r) => r.id);
+  private async enrich(links: Row[]): Promise<RestaurantFull[]> {
+    if (links.length === 0) return [];
+    const ids = links.map((l) => l.restaurant_id);
+    const [catalogRows, members] = await Promise.all([
+      unwrap(this.client.from("restaurants").select("*").in("id", ids)),
+      this.memberIds(),
+    ]);
     const [ratingRows, visitRows] = await Promise.all([
-      this.unwrap(
-        this.client.from("ratings").select("restaurant_id, profile_id, score").in("restaurant_id", ids)
-      ),
-      this.unwrap(
-        this.client.from("visits").select("restaurant_id, date").in("restaurant_id", ids)
+      members.length
+        ? unwrap(
+            this.client
+              .from("ratings")
+              .select("restaurant_id, profile_id, score")
+              .in("restaurant_id", ids)
+              .in("profile_id", members)
+          )
+        : Promise.resolve([] as Row[]),
+      unwrap(
+        this.client
+          .from("visits")
+          .select("restaurant_id, date")
+          .eq("household_id", this.hid)
+          .in("restaurant_id", ids)
       ),
     ]);
-    const ratingsByRestaurant = new Map<string, Record<string, number>>();
+
+    const catalogById = new Map((catalogRows ?? []).map((r: Row) => [r.id, rowToCatalog(r)]));
+    const ratingsByR = new Map<string, Record<string, number>>();
     for (const row of (ratingRows ?? []) as Row[]) {
-      const map = ratingsByRestaurant.get(row.restaurant_id) ?? {};
-      map[row.profile_id] = row.score;
-      ratingsByRestaurant.set(row.restaurant_id, map);
+      const m = ratingsByR.get(row.restaurant_id) ?? {};
+      m[row.profile_id] = row.score;
+      ratingsByR.set(row.restaurant_id, m);
     }
     const lastVisit = new Map<string, string>();
     const visitCount = new Map<string, number>();
@@ -149,94 +232,180 @@ export class SupabaseAdapter implements DataAdapter {
       const prev = lastVisit.get(row.restaurant_id);
       if (!prev || row.date > prev) lastVisit.set(row.restaurant_id, row.date);
     }
-    return restaurants.map((r) => ({
-      ...r,
-      ratings: ratingsByRestaurant.get(r.id) ?? {},
-      lastVisitAt: lastVisit.get(r.id) ?? null,
-      visitCount: visitCount.get(r.id) ?? 0,
-    }));
+
+    const out: RestaurantFull[] = [];
+    for (const link of links) {
+      const c = catalogById.get(link.restaurant_id);
+      if (!c) continue;
+      out.push({
+        ...c,
+        status: link.status,
+        notes: link.notes,
+        ratings: ratingsByR.get(link.restaurant_id) ?? {},
+        lastVisitAt: lastVisit.get(link.restaurant_id) ?? null,
+        visitCount: visitCount.get(link.restaurant_id) ?? 0,
+      });
+    }
+    return out;
   }
 
   async listRestaurants(): Promise<RestaurantFull[]> {
-    const rows = await this.unwrap(
-      this.client.from("restaurants").select("*").order("name", { ascending: true })
+    const links = await unwrap(
+      this.client.from("group_restaurants").select("*").eq("household_id", this.hid)
     );
-    return this.enrichAll((rows ?? []).map(rowToRestaurant));
+    const full = await this.enrich(links ?? []);
+    return full.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getRestaurant(id: string): Promise<RestaurantFull | null> {
-    const row = await this.unwrap(
-      this.client.from("restaurants").select("*").eq("id", id).maybeSingle()
+    const link = await unwrap(
+      this.client
+        .from("group_restaurants")
+        .select("*")
+        .eq("household_id", this.hid)
+        .eq("restaurant_id", id)
+        .maybeSingle()
     );
-    if (!row) return null;
-    const [full] = await this.enrichAll([rowToRestaurant(row)]);
-    return full;
+    if (!link) return null;
+    const [full] = await this.enrich([link]);
+    return full ?? null;
+  }
+
+  private async findCatalogId(data: NewRestaurant): Promise<string | null> {
+    if (data.googlePlaceId) {
+      const byPid = await unwrap(
+        this.client.from("restaurants").select("id").eq("google_place_id", data.googlePlaceId).maybeSingle()
+      );
+      if (byPid) return byPid.id;
+    }
+    const byName = await unwrap(
+      this.client.from("restaurants").select("id").ilike("name", data.name).limit(1).maybeSingle()
+    );
+    return byName?.id ?? null;
   }
 
   async createRestaurant(data: NewRestaurant): Promise<Restaurant> {
-    const row = await this.unwrap(
-      this.client.from("restaurants").insert(restaurantToRow(data)).select().single()
+    let catalogId = await this.findCatalogId(data);
+    let catalog: Catalog;
+    if (catalogId) {
+      const row = await unwrap(
+        this.client.from("restaurants").select("*").eq("id", catalogId).single()
+      );
+      catalog = rowToCatalog(row);
+    } else {
+      const row = await unwrap(
+        this.client.from("restaurants").insert(catalogToRow(data)).select().single()
+      );
+      catalog = rowToCatalog(row);
+      catalogId = catalog.id;
+    }
+    await unwrap(
+      this.client.from("group_restaurants").upsert(
+        { household_id: this.hid, restaurant_id: catalogId, status: data.status, notes: data.notes },
+        { onConflict: "household_id,restaurant_id" }
+      )
     );
-    return rowToRestaurant(row);
+    return { ...catalog, status: data.status, notes: data.notes };
   }
 
   async updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void> {
-    await this.unwrap(this.client.from("restaurants").update(restaurantToRow(data)).eq("id", id));
+    if (hasCatalogChange(data)) {
+      await unwrap(this.client.from("restaurants").update(catalogToRow(data)).eq("id", id));
+    }
+    if (data.status !== undefined || data.notes !== undefined) {
+      const patch: Row = {};
+      if (data.status !== undefined) patch.status = data.status;
+      if (data.notes !== undefined) patch.notes = data.notes;
+      await unwrap(
+        this.client
+          .from("group_restaurants")
+          .update(patch)
+          .eq("household_id", this.hid)
+          .eq("restaurant_id", id)
+      );
+    }
   }
 
   async deleteRestaurant(id: string): Promise<void> {
-    await this.unwrap(this.client.from("restaurants").delete().eq("id", id));
+    await unwrap(
+      this.client
+        .from("group_restaurants")
+        .delete()
+        .eq("household_id", this.hid)
+        .eq("restaurant_id", id)
+    );
+    await unwrap(
+      this.client.from("visits").delete().eq("household_id", this.hid).eq("restaurant_id", id)
+    );
+    const members = await this.memberIds();
+    if (members.length) {
+      await unwrap(
+        this.client.from("ratings").delete().eq("restaurant_id", id).in("profile_id", members)
+      );
+    }
   }
 
   async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
     if (survivorId === loserId) return;
     const [survivor, loser] = await Promise.all([
-      this.unwrap(this.client.from("restaurants").select("*").eq("id", survivorId).maybeSingle()),
-      this.unwrap(this.client.from("restaurants").select("*").eq("id", loserId).maybeSingle()),
+      unwrap(this.client.from("restaurants").select("*").eq("id", survivorId).maybeSingle()),
+      unwrap(this.client.from("restaurants").select("*").eq("id", loserId).maybeSingle()),
     ]);
     if (!survivor || !loser) return;
 
-    // free up the loser's unique google_place_id before the survivor adopts it
     if (!survivor.google_place_id && loser.google_place_id) {
-      await this.unwrap(
-        this.client.from("restaurants").update({ google_place_id: null }).eq("id", loserId)
-      );
+      await unwrap(this.client.from("restaurants").update({ google_place_id: null }).eq("id", loserId));
     }
+    await unwrap(
+      this.client
+        .from("restaurants")
+        .update({
+          cuisines: [...new Set([...(survivor.cuisines ?? []), ...(loser.cuisines ?? [])])],
+          tags: [...new Set([...(survivor.tags ?? []), ...(loser.tags ?? [])])],
+          address: survivor.address ?? loser.address,
+          lat: survivor.lat ?? loser.lat,
+          lng: survivor.lng ?? loser.lng,
+          google_place_id: survivor.google_place_id ?? loser.google_place_id,
+          maps_url: survivor.maps_url ?? loser.maps_url,
+          reserve_url: survivor.reserve_url ?? loser.reserve_url,
+        })
+        .eq("id", survivorId)
+    );
 
-    const merged: Row = {
-      cuisines: [...new Set([...(survivor.cuisines ?? []), ...(loser.cuisines ?? [])])],
-      tags: [...new Set([...(survivor.tags ?? []), ...(loser.tags ?? [])])],
-      address: survivor.address ?? loser.address,
-      lat: survivor.lat ?? loser.lat,
-      lng: survivor.lng ?? loser.lng,
-      google_place_id: survivor.google_place_id ?? loser.google_place_id,
-      maps_url: survivor.maps_url ?? loser.maps_url,
-      reserve_url: survivor.reserve_url ?? loser.reserve_url,
-      notes: survivor.notes || loser.notes,
-      status: survivor.status === "active" || loser.status === "active" ? "active" : survivor.status,
-    };
-    await this.unwrap(this.client.from("restaurants").update(merged).eq("id", survivorId));
+    // repoint group links for households that don't already track the survivor
+    const survLinks = await unwrap(
+      this.client.from("group_restaurants").select("household_id").eq("restaurant_id", survivorId)
+    );
+    const survHouseholds = (survLinks ?? []).map((r: Row) => r.household_id);
+    let moveLinks = this.client
+      .from("group_restaurants")
+      .update({ restaurant_id: survivorId })
+      .eq("restaurant_id", loserId);
+    if (survHouseholds.length) moveLinks = moveLinks.not("household_id", "in", `(${survHouseholds.join(",")})`);
+    await unwrap(moveLinks);
 
-    // move visits over
-    await this.unwrap(
+    await unwrap(
       this.client.from("visits").update({ restaurant_id: survivorId }).eq("restaurant_id", loserId)
     );
 
-    // adopt the loser's ratings only for profiles the survivor hasn't rated
-    const survivorRatings = await this.unwrap(
+    const survRatings = await unwrap(
       this.client.from("ratings").select("profile_id").eq("restaurant_id", survivorId)
     );
-    const taken = (survivorRatings ?? []).map((r: Row) => r.profile_id);
-    let move = this.client.from("ratings").update({ restaurant_id: survivorId }).eq("restaurant_id", loserId);
-    if (taken.length > 0) move = move.not("profile_id", "in", `(${taken.join(",")})`);
-    await this.unwrap(move);
+    const ratedProfiles = (survRatings ?? []).map((r: Row) => r.profile_id);
+    let moveRatings = this.client
+      .from("ratings")
+      .update({ restaurant_id: survivorId })
+      .eq("restaurant_id", loserId);
+    if (ratedProfiles.length) moveRatings = moveRatings.not("profile_id", "in", `(${ratedProfiles.join(",")})`);
+    await unwrap(moveRatings);
 
-    // deleting the loser cascade-drops any leftover (duplicate) ratings/visits
-    await this.unwrap(this.client.from("restaurants").delete().eq("id", loserId));
+    await unwrap(this.client.from("restaurants").delete().eq("id", loserId));
   }
 
   async setRating(restaurantId: string, profileId: string, score: number): Promise<void> {
-    await this.unwrap(
+    const members = await this.memberIds();
+    if (!members.includes(profileId)) return;
+    await unwrap(
       this.client.from("ratings").upsert(
         { restaurant_id: restaurantId, profile_id: profileId, score, updated_at: new Date().toISOString() },
         { onConflict: "restaurant_id,profile_id" }
@@ -245,23 +414,31 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
-    await this.unwrap(
-      this.client.from("visits").insert({ restaurant_id: restaurantId, date, mode, note })
+    await unwrap(
+      this.client
+        .from("visits")
+        .insert({ household_id: this.hid, restaurant_id: restaurantId, date, mode, note })
     );
   }
 
   async listRecentVisits(limit: number): Promise<Visit[]> {
-    const rows = await this.unwrap(
-      this.client.from("visits").select("*").order("date", { ascending: false }).limit(limit)
+    const rows = await unwrap(
+      this.client
+        .from("visits")
+        .select("*")
+        .eq("household_id", this.hid)
+        .order("date", { ascending: false })
+        .limit(limit)
     );
     return (rows ?? []).map(rowToVisit);
   }
 
   async listVisitsForRestaurant(restaurantId: string): Promise<Visit[]> {
-    const rows = await this.unwrap(
+    const rows = await unwrap(
       this.client
         .from("visits")
         .select("*")
+        .eq("household_id", this.hid)
         .eq("restaurant_id", restaurantId)
         .order("date", { ascending: false })
     );
@@ -269,13 +446,17 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async createVoteSession(candidateIds: string[]): Promise<VoteSession> {
-    await this.unwrap(
-      this.client.from("vote_sessions").update({ status: "closed" }).eq("status", "open")
-    );
-    const row = await this.unwrap(
+    await unwrap(
       this.client
         .from("vote_sessions")
-        .insert({ status: "open", candidate_ids: candidateIds })
+        .update({ status: "closed" })
+        .eq("household_id", this.hid)
+        .eq("status", "open")
+    );
+    const row = await unwrap(
+      this.client
+        .from("vote_sessions")
+        .insert({ household_id: this.hid, status: "open", candidate_ids: candidateIds })
         .select()
         .single()
     );
@@ -283,10 +464,11 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async getOpenVoteSession(): Promise<VoteSession | null> {
-    const row = await this.unwrap(
+    const row = await unwrap(
       this.client
         .from("vote_sessions")
         .select("*")
+        .eq("household_id", this.hid)
         .eq("status", "open")
         .order("created_at", { ascending: false })
         .limit(1)
@@ -296,10 +478,11 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async getLatestVoteSession(): Promise<VoteSession | null> {
-    const row = await this.unwrap(
+    const row = await unwrap(
       this.client
         .from("vote_sessions")
         .select("*")
+        .eq("household_id", this.hid)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle()
@@ -308,16 +491,20 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async getVoteSession(id: string): Promise<VoteSession | null> {
-    const row = await this.unwrap(
-      this.client.from("vote_sessions").select("*").eq("id", id).maybeSingle()
+    const row = await unwrap(
+      this.client
+        .from("vote_sessions")
+        .select("*")
+        .eq("id", id)
+        .eq("household_id", this.hid)
+        .maybeSingle()
     );
     return row ? rowToSession(row) : null;
   }
 
   async listVotes(sessionId: string): Promise<Vote[]> {
-    const rows = await this.unwrap(
-      this.client.from("votes").select("*").eq("session_id", sessionId)
-    );
+    if (!(await this.getVoteSession(sessionId))) return [];
+    const rows = await unwrap(this.client.from("votes").select("*").eq("session_id", sessionId));
     return (rows ?? []).map((r: Row) => ({
       sessionId: r.session_id,
       profileId: r.profile_id,
@@ -334,34 +521,31 @@ export class SupabaseAdapter implements DataAdapter {
     vetoId: string | null,
     deferred: boolean
   ): Promise<void> {
-    await this.unwrap(
+    if (!(await this.getVoteSession(sessionId))) return;
+    await unwrap(
       this.client.from("votes").upsert(
-        {
-          session_id: sessionId,
-          profile_id: profileId,
-          pick_id: pickId,
-          veto_id: vetoId,
-          deferred,
-        },
+        { session_id: sessionId, profile_id: profileId, pick_id: pickId, veto_id: vetoId, deferred },
         { onConflict: "session_id,profile_id" }
       )
     );
   }
 
   async closeVoteSession(sessionId: string, winnerId: string | null): Promise<void> {
-    await this.unwrap(
+    await unwrap(
       this.client
         .from("vote_sessions")
         .update({ status: "closed", winner_id: winnerId })
         .eq("id", sessionId)
+        .eq("household_id", this.hid)
     );
   }
 
   async listDiscoveries(): Promise<Discovery[]> {
-    const rows = await this.unwrap(
+    const rows = await unwrap(
       this.client
         .from("discoveries")
         .select("*")
+        .eq("household_id", this.hid)
         .eq("dismissed", false)
         .order("found_at", { ascending: false })
     );
@@ -379,51 +563,63 @@ export class SupabaseAdapter implements DataAdapter {
   async upsertDiscoveries(items: DiscoveryInput[]): Promise<number> {
     if (items.length === 0) return 0;
     const rows = items.map((d) => ({
+      household_id: this.hid,
       place_id: d.placeId,
       name: d.name,
       address: d.address,
       rating: d.rating,
       maps_url: d.mapsUrl,
     }));
-    const inserted = await this.unwrap(
+    const inserted = await unwrap(
       this.client
         .from("discoveries")
-        .upsert(rows, { onConflict: "place_id", ignoreDuplicates: true })
+        .upsert(rows, { onConflict: "household_id,place_id", ignoreDuplicates: true })
         .select("place_id")
     );
     return (inserted ?? []).length;
   }
 
   async dismissDiscovery(placeId: string): Promise<void> {
-    await this.unwrap(
-      this.client.from("discoveries").update({ dismissed: true }).eq("place_id", placeId)
+    await unwrap(
+      this.client
+        .from("discoveries")
+        .update({ dismissed: true })
+        .eq("household_id", this.hid)
+        .eq("place_id", placeId)
     );
   }
 
   async listSeenPlaceIds(): Promise<string[]> {
-    const rows = await this.unwrap(this.client.from("seen_places").select("place_id"));
+    const rows = await unwrap(
+      this.client.from("seen_places").select("place_id").eq("household_id", this.hid)
+    );
     return (rows ?? []).map((r: Row) => r.place_id);
   }
 
   async markPlacesSeen(placeIds: string[]): Promise<void> {
     if (placeIds.length === 0) return;
-    await this.unwrap(
+    await unwrap(
       this.client
         .from("seen_places")
-        .upsert(placeIds.map((place_id) => ({ place_id })), { ignoreDuplicates: true })
+        .upsert(placeIds.map((place_id) => ({ household_id: this.hid, place_id })), {
+          onConflict: "household_id,place_id",
+          ignoreDuplicates: true,
+        })
     );
   }
 
   async getSettings(): Promise<Settings> {
-    const row = await this.unwrap(
-      this.client.from("settings").select("value").eq("key", "app").maybeSingle()
+    const row = await unwrap(
+      this.client.from("settings").select("value").eq("household_id", this.hid).maybeSingle()
     );
     return row?.value ? { ...DEFAULT_SETTINGS, ...row.value } : { ...DEFAULT_SETTINGS };
   }
 
   async saveSettings(settings: Settings): Promise<void> {
-    await this.unwrap(
-      this.client.from("settings").upsert({ key: "app", value: settings }, { onConflict: "key" })
+    await unwrap(
+      this.client
+        .from("settings")
+        .upsert({ household_id: this.hid, value: settings }, { onConflict: "household_id" })
     );
   }
 }

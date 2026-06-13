@@ -31,9 +31,9 @@ function Bar({ label, value, max }: { label: string; value: number; max: number 
 
 export default async function InsightsPage() {
   const [restaurants, visits, profiles] = await Promise.all([
-    db().listRestaurants(),
-    db().listRecentVisits(100000),
-    db().listProfiles(),
+    (await db()).listRestaurants(),
+    (await db()).listRecentVisits(100000),
+    (await db()).listProfiles(),
   ]);
   const i = computeInsights(restaurants, visits, profiles);
   const profileById = new Map(profiles.map((p) => [p.id, p]));

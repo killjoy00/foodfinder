@@ -3,10 +3,10 @@ import { TonightPicker } from "@/components/TonightPicker";
 
 export default async function TonightPage() {
   const [restaurants, profiles, recentVisits, settings] = await Promise.all([
-    db().listRestaurants(),
-    db().listProfiles(),
-    db().listRecentVisits(3),
-    db().getSettings(),
+    (await db()).listRestaurants(),
+    (await db()).listProfiles(),
+    (await db()).listRecentVisits(3),
+    (await db()).getSettings(),
   ]);
 
   const byId = new Map(restaurants.map((r) => [r.id, r]));

@@ -1,9 +1,17 @@
 # Deploying FoodFinder — one-time setup (~10 minutes)
 
-> **Already deployed? One-time database update for the "defer your vote"
-> feature.** Open Supabase → SQL Editor → New query, paste the contents of
-> `supabase/migrations/0002_vote_defer.sql`, and Run. Until you do, starting
-> or deferring a vote will error; everything else keeps working.
+> **⚠️ Already deployed? Multiple-groups upgrade — run the migration BEFORE
+> the new code goes live.** The multi-group version needs new tables, and
+> login changes from one shared password to **group name + password**.
+> 1. Open `supabase/migrations/0003_multi_group.sql`, edit the three marked
+>    lines (your group's name, the same name lowercased, and your password),
+>    and run the whole file in the Supabase SQL Editor. It's additive and
+>    preserves all your data, folding it into your default group.
+> 2. In Vercel, add an env var `AUTH_SECRET` = any long random string, then
+>    redeploy.
+> 3. Log in with the group name and password you set in step 1.
+>
+> (If you also skipped the earlier vote-defer update, 0003 includes it.)
 
 
 After this checklist, every push to the repo deploys automatically and the
@@ -34,12 +42,14 @@ accounts on Supabase and Vercel. No credit card for either.
    |---|---|
    | `SUPABASE_URL` | the Project URL from step 1.5 |
    | `SUPABASE_SERVICE_ROLE_KEY` | the service_role key from step 1.5 |
-   | `FAMILY_PASSWORD` | whatever password the family will type to get in |
+   | `AUTH_SECRET` | any long random string (signs the login cookie) |
    | `CRON_SECRET` | any random string (mash the keyboard) |
 
 4. Click **Deploy**. ~2 minutes later you get a URL like
-   `https://foodfinder-xyz.vercel.app`. That's your app — open it, enter the
-   family password, add your family members, done.
+   `https://foodfinder-xyz.vercel.app`. That's your app — open it, tap **New
+   group**, pick a group name + password, add your family members, done.
+   Other families can tap **New group** to make their own, or **Join a
+   group** with a name + password you share.
 
 > The weekly discovery sweep and the database keep-alive ping are already
 > configured in `vercel.json`; Vercel picks them up automatically.

@@ -15,7 +15,10 @@ member, and let a weighted spin wheel settle "where should we eat tonight?"
   recency weighting) fresh.
 - **Family vote** — the wheel proposes three; everyone picks a favorite on
   their own phone and gets one veto. Most picks wins, vetoes knock options out.
-- **Per-person ratings** — Netflix-style profiles behind one shared password;
+- **Multiple groups** — each family is its own group (group name + password)
+  with its own profiles, lists, ratings, and votes; restaurants are deduped
+  into a shared catalog behind the scenes.
+- **Per-person ratings** — Netflix-style profiles within a group;
   every family member rates places 1–10.
 - **Wishlist** — places to try; first visit moves them to the rotation.
 - **Discover** — a weekly sweep flags newly opened restaurants near home, and

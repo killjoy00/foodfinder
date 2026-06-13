@@ -5,7 +5,7 @@ import { DiscoverClient } from "@/components/DiscoverClient";
 export const dynamic = "force-dynamic";
 
 export default async function DiscoverPage() {
-  const [discoveries, settings] = await Promise.all([db().listDiscoveries(), db().getSettings()]);
+  const [discoveries, settings] = await Promise.all([(await db()).listDiscoveries(), (await db()).getSettings()]);
   return (
     <DiscoverClient
       discoveries={discoveries}

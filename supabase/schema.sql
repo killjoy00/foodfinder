@@ -1,12 +1,25 @@
--- FoodFinder schema. Paste this whole file into the Supabase SQL Editor
--- (Dashboard → SQL Editor → New query → Run) when setting up the project.
+-- FoodFinder schema (multi-group). Paste into the Supabase SQL Editor for a
+-- NEW project. Existing projects should run the migrations in
+-- supabase/migrations/ instead, which preserve data.
 --
 -- The app talks to the database with the service-role key from the server
--- only, which bypasses RLS. RLS is enabled with no policies so nothing is
--- readable through Supabase's public API.
+-- only and scopes every query by household_id in code. RLS is enabled with
+-- no policies so nothing is readable through Supabase's public API.
+
+create extension if not exists pgcrypto;
+
+-- a "household" is one family group, with its own login
+create table if not exists households (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  name_key text not null unique, -- lower(name), used for login lookup
+  password_hash text not null,
+  created_at timestamptz not null default now()
+);
 
 create table if not exists profiles (
   id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
   name text not null,
   emoji text not null default '🙂',
   color text not null default '#f97316',
@@ -14,6 +27,7 @@ create table if not exists profiles (
   created_at timestamptz not null default now()
 );
 
+-- shared catalog: objective facts about a restaurant, used by every group
 create table if not exists restaurants (
   id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -26,9 +40,17 @@ create table if not exists restaurants (
   maps_url text,
   reserve_url text,
   tags text[] not null default '{}',
+  created_at timestamptz not null default now()
+);
+
+-- each group's curated list: which catalog entries they track, and how
+create table if not exists group_restaurants (
+  household_id uuid not null references households(id) on delete cascade,
+  restaurant_id uuid not null references restaurants(id) on delete cascade,
   status text not null default 'active' check (status in ('active', 'wishlist')),
   notes text,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  primary key (household_id, restaurant_id)
 );
 
 create table if not exists ratings (
@@ -41,6 +63,7 @@ create table if not exists ratings (
 
 create table if not exists visits (
   id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
   restaurant_id uuid not null references restaurants(id) on delete cascade,
   date timestamptz not null default now(),
   mode text not null default 'dine_in' check (mode in ('dine_in', 'takeout')),
@@ -49,6 +72,7 @@ create table if not exists visits (
 
 create table if not exists vote_sessions (
   id uuid primary key default gen_random_uuid(),
+  household_id uuid not null references households(id) on delete cascade,
   created_at timestamptz not null default now(),
   status text not null default 'open' check (status in ('open', 'closed')),
   candidate_ids uuid[] not null default '{}',
@@ -65,29 +89,37 @@ create table if not exists votes (
 );
 
 create table if not exists discoveries (
-  place_id text primary key,
+  household_id uuid not null references households(id) on delete cascade,
+  place_id text not null,
   name text not null,
   address text,
   rating double precision,
   maps_url text,
   found_at timestamptz not null default now(),
-  dismissed boolean not null default false
+  dismissed boolean not null default false,
+  primary key (household_id, place_id)
 );
 
 create table if not exists seen_places (
-  place_id text primary key
+  household_id uuid not null references households(id) on delete cascade,
+  place_id text not null,
+  primary key (household_id, place_id)
 );
 
 create table if not exists settings (
-  key text primary key,
+  household_id uuid primary key references households(id) on delete cascade,
   value jsonb not null
 );
 
+create index if not exists group_restaurants_household on group_restaurants (household_id);
+create index if not exists visits_household_date on visits (household_id, date desc);
 create index if not exists visits_restaurant_date on visits (restaurant_id, date desc);
-create index if not exists visits_date on visits (date desc);
+create index if not exists profiles_household on profiles (household_id);
 
+alter table households enable row level security;
 alter table profiles enable row level security;
 alter table restaurants enable row level security;
+alter table group_restaurants enable row level security;
 alter table ratings enable row level security;
 alter table visits enable row level security;
 alter table vote_sessions enable row level security;

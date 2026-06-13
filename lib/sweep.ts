@@ -1,4 +1,4 @@
-import { db } from "./data";
+import { DataAdapter } from "./data/adapter";
 import { nearbyRestaurants, placesKey } from "./places";
 
 export type SweepResult =
@@ -6,15 +6,15 @@ export type SweepResult =
   | { ok: false; error: string };
 
 /**
- * Weekly discovery sweep: pull popular restaurants around home and diff
- * against everything we've seen before. The first run just records a
- * baseline so long-established places don't flood the feed as "new".
+ * Discovery sweep for one group: pull popular restaurants around that
+ * group's home and diff against what it has seen before. The first run just
+ * records a baseline so long-established places don't flood the feed.
  */
-export async function runDiscoverySweep(): Promise<SweepResult> {
+export async function runDiscoverySweep(adapter: DataAdapter): Promise<SweepResult> {
   const key = placesKey();
   if (!key) return { ok: false, error: "GOOGLE_PLACES_API_KEY is not set" };
 
-  const settings = await db().getSettings();
+  const settings = await adapter.getSettings();
   if (settings.homeLat === null || settings.homeLng === null) {
     return { ok: false, error: "Home location is not set (see Settings)" };
   }
@@ -26,16 +26,16 @@ export async function runDiscoverySweep(): Promise<SweepResult> {
     key
   );
 
-  const seenBefore = new Set(await db().listSeenPlaceIds());
+  const seenBefore = new Set(await adapter.listSeenPlaceIds());
   const baseline = seenBefore.size === 0;
   const unseen = places.filter((p) => !seenBefore.has(p.placeId));
 
-  const restaurants = await db().listRestaurants();
+  const restaurants = await adapter.listRestaurants();
   const trackedIds = new Set(restaurants.map((r) => r.googlePlaceId).filter(Boolean));
 
   let added = 0;
   if (!baseline) {
-    added = await db().upsertDiscoveries(
+    added = await adapter.upsertDiscoveries(
       unseen
         .filter((p) => !trackedIds.has(p.placeId))
         .map((p) => ({
@@ -47,7 +47,7 @@ export async function runDiscoverySweep(): Promise<SweepResult> {
         }))
     );
   }
-  await db().markPlacesSeen(places.map((p) => p.placeId));
+  await adapter.markPlacesSeen(places.map((p) => p.placeId));
 
   return { ok: true, baseline, seen: places.length, added };
 }

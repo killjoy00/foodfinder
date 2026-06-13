@@ -2,7 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { clearActiveProfile, login, requireProfile, setActiveProfile } from "@/lib/auth";
+import {
+  clearActiveProfile,
+  createHousehold,
+  loginToHousehold,
+  logout,
+  requireProfile,
+  setActiveProfile,
+} from "@/lib/auth";
 import { db } from "@/lib/data";
 import { NewRestaurant } from "@/lib/data/adapter";
 import {
@@ -25,8 +32,21 @@ export async function loginAction(
   _prev: { error: string } | null,
   formData: FormData
 ): Promise<{ error: string } | null> {
-  const ok = await login(String(formData.get("password") ?? ""));
-  if (!ok) return { error: "That's not the family password." };
+  const name = String(formData.get("group") ?? "");
+  const password = String(formData.get("password") ?? "");
+  const ok = await loginToHousehold(name, password);
+  if (!ok) return { error: "That group name and password don't match." };
+  redirect("/profiles");
+}
+
+export async function createGroupAction(
+  _prev: { error: string } | null,
+  formData: FormData
+): Promise<{ error: string } | null> {
+  const name = String(formData.get("group") ?? "");
+  const password = String(formData.get("password") ?? "");
+  const result = await createHousehold(name, password);
+  if (!result.ok) return { error: result.error ?? "Couldn't create that group." };
   redirect("/profiles");
 }
 
@@ -40,12 +60,17 @@ export async function switchProfileAction(): Promise<void> {
   redirect("/profiles");
 }
 
+export async function logoutAction(): Promise<void> {
+  await logout();
+  redirect("/login");
+}
+
 export async function addProfileAction(formData: FormData): Promise<void> {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const emoji = String(formData.get("emoji") ?? "🙂").trim() || "🙂";
   const color = String(formData.get("color") ?? "#f97316");
-  await db().createProfile(name, emoji, color);
+  await (await db()).createProfile(name, emoji, color);
   revalidatePath("/profiles");
   revalidatePath("/settings");
 }
@@ -54,7 +79,7 @@ export async function updateProfileAction(profileId: string, formData: FormData)
   await requireProfile();
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
-  await db().updateProfile(profileId, {
+  await (await db()).updateProfile(profileId, {
     name,
     emoji: String(formData.get("emoji") ?? "🙂").trim() || "🙂",
     color: String(formData.get("color") ?? "#f97316"),
@@ -65,7 +90,7 @@ export async function updateProfileAction(profileId: string, formData: FormData)
 }
 
 export async function deleteProfileAction(profileId: string): Promise<void> {
-  await db().deleteProfile(profileId);
+  await (await db()).deleteProfile(profileId);
   revalidatePath("/profiles");
 }
 
@@ -103,7 +128,7 @@ export async function addRestaurantAction(formData: FormData): Promise<void> {
   await requireProfile();
   const data = restaurantFromForm(formData);
   if (!data.name) return;
-  const created = await db().createRestaurant(data);
+  const created = await (await db()).createRestaurant(data);
   revalidatePath("/restaurants");
   redirect(`/restaurants/${created.id}`);
 }
@@ -112,21 +137,21 @@ export async function updateRestaurantAction(id: string, formData: FormData): Pr
   await requireProfile();
   const data = restaurantFromForm(formData);
   if (!data.name) return;
-  await db().updateRestaurant(id, data);
+  await (await db()).updateRestaurant(id, data);
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
 }
 
 export async function deleteRestaurantAction(id: string): Promise<void> {
   await requireProfile();
-  await db().deleteRestaurant(id);
+  await (await db()).deleteRestaurant(id);
   revalidatePath("/restaurants");
   redirect("/restaurants");
 }
 
 export async function mergeRestaurantsAction(survivorId: string, loserId: string): Promise<void> {
   await requireProfile();
-  await db().mergeRestaurants(survivorId, loserId);
+  await (await db()).mergeRestaurants(survivorId, loserId);
   revalidatePath("/restaurants");
   revalidatePath("/restaurants/duplicates");
   revalidatePath("/");
@@ -134,7 +159,7 @@ export async function mergeRestaurantsAction(survivorId: string, loserId: string
 
 export async function setStatusAction(id: string, status: RestaurantStatus): Promise<void> {
   await requireProfile();
-  await db().updateRestaurant(id, { status });
+  await (await db()).updateRestaurant(id, { status });
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
   revalidatePath("/");
@@ -147,7 +172,7 @@ export async function setRatingAction(
 ): Promise<void> {
   await requireProfile();
   if (score < 1 || score > 10) return;
-  await db().setRating(restaurantId, profileId, Math.round(score));
+  await (await db()).setRating(restaurantId, profileId, Math.round(score));
   revalidatePath(`/restaurants/${restaurantId}`);
   revalidatePath("/restaurants");
 }
@@ -160,11 +185,11 @@ export async function logVisitAction(
   note?: string
 ): Promise<void> {
   await requireProfile();
-  await db().addVisit(restaurantId, new Date().toISOString(), mode, note?.trim() || null);
+  await (await db()).addVisit(restaurantId, new Date().toISOString(), mode, note?.trim() || null);
   // A visit means it's no longer just a wish.
-  const restaurant = await db().getRestaurant(restaurantId);
+  const restaurant = await (await db()).getRestaurant(restaurantId);
   if (restaurant?.status === "wishlist") {
-    await db().updateRestaurant(restaurantId, { status: "active" });
+    await (await db()).updateRestaurant(restaurantId, { status: "active" });
   }
   revalidatePath("/");
   revalidatePath("/restaurants");
@@ -176,7 +201,7 @@ export async function logVisitAction(
 export async function startVoteAction(candidateIds: string[]): Promise<void> {
   await requireProfile();
   if (candidateIds.length < 2) return;
-  await db().createVoteSession(candidateIds.slice(0, 8));
+  await (await db()).createVoteSession(candidateIds.slice(0, 8));
   revalidatePath("/vote");
   redirect("/vote");
 }
@@ -189,15 +214,15 @@ export async function startQuickVoteAction(count: number): Promise<void> {
   await requireProfile();
   const size = Math.min(8, Math.max(2, Math.round(count) || DEFAULT_VOTE_SIZE));
   const [restaurants, recentVisits] = await Promise.all([
-    db().listRestaurants(),
-    db().listRecentVisits(3),
+    (await db()).listRestaurants(),
+    (await db()).listRecentVisits(3),
   ]);
   const byId = new Map(restaurants.map((r) => [r.id, r]));
   const recentCuisines = recentVisits.map((v) => byId.get(v.restaurantId)?.cuisines ?? []);
   const { regulars, wishlist } = buildCandidates(restaurants, DEFAULT_FILTERS, recentCuisines);
   const candidates = sampleCandidates([...regulars, ...wishlist], size);
   if (candidates.length < 2) return;
-  await db().createVoteSession(candidates.map((c) => c.restaurant.id));
+  await (await db()).createVoteSession(candidates.map((c) => c.restaurant.id));
   revalidatePath("/vote");
 }
 
@@ -208,36 +233,36 @@ export async function castVoteAction(
   deferred: boolean = false
 ): Promise<void> {
   const profile = await requireProfile();
-  const session = await db().getVoteSession(sessionId);
+  const session = await (await db()).getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
   if (deferred) {
-    await db().castVote(sessionId, profile.id, null, null, true);
+    await (await db()).castVote(sessionId, profile.id, null, null, true);
   } else {
     if (pickId && vetoId && pickId === vetoId) return;
-    await db().castVote(sessionId, profile.id, pickId, vetoId, false);
+    await (await db()).castVote(sessionId, profile.id, pickId, vetoId, false);
   }
   revalidatePath("/vote");
 }
 
 export async function closeVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
-  const session = await db().getVoteSession(sessionId);
+  const session = await (await db()).getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
-  const [votes, profiles] = await Promise.all([db().listVotes(sessionId), db().listProfiles()]);
+  const [votes, profiles] = await Promise.all([(await db()).listVotes(sessionId), (await db()).listProfiles()]);
 
   // a banked double-vote credit makes this round's pick count twice
   const creditOf = new Map(profiles.map((p) => [p.id, p.doubleCredits]));
   const weightOf = (profileId: string) => ((creditOf.get(profileId) ?? 0) > 0 ? 2 : 1);
   const winnerId = tallyVotes(session.candidateIds, votes, Math.random, weightOf);
-  await db().closeVoteSession(sessionId, winnerId);
+  await (await db()).closeVoteSession(sessionId, winnerId);
 
   // settle credits: bank one per deferral, spend one when a credit was used
   for (const v of votes) {
     const credits = creditOf.get(v.profileId) ?? 0;
     if (v.deferred) {
-      await db().setDoubleCredits(v.profileId, credits + 1);
+      await (await db()).setDoubleCredits(v.profileId, credits + 1);
     } else if (v.pickId && credits > 0) {
-      await db().setDoubleCredits(v.profileId, credits - 1);
+      await (await db()).setDoubleCredits(v.profileId, credits - 1);
     }
   }
   revalidatePath("/vote");
@@ -245,7 +270,7 @@ export async function closeVoteAction(sessionId: string): Promise<void> {
 
 export async function cancelVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
-  await db().closeVoteSession(sessionId, null);
+  await (await db()).closeVoteSession(sessionId, null);
   revalidatePath("/vote");
 }
 
@@ -253,16 +278,16 @@ export async function cancelVoteAction(sessionId: string): Promise<void> {
 
 export async function dismissDiscoveryAction(placeId: string): Promise<void> {
   await requireProfile();
-  await db().dismissDiscovery(placeId);
+  await (await db()).dismissDiscovery(placeId);
   revalidatePath("/discover");
 }
 
 export async function addDiscoveryToWishlistAction(placeId: string): Promise<void> {
   await requireProfile();
-  const discoveries = await db().listDiscoveries();
+  const discoveries = await (await db()).listDiscoveries();
   const d = discoveries.find((x) => x.placeId === placeId);
   if (!d) return;
-  await db().createRestaurant({
+  await (await db()).createRestaurant({
     name: d.name,
     cuisines: [],
     price: 2,
@@ -276,14 +301,14 @@ export async function addDiscoveryToWishlistAction(placeId: string): Promise<voi
     status: "wishlist",
     notes: "From the discovery feed",
   });
-  await db().dismissDiscovery(placeId);
+  await (await db()).dismissDiscovery(placeId);
   revalidatePath("/discover");
   revalidatePath("/restaurants");
 }
 
 export async function runSweepAction(): Promise<SweepResult> {
   await requireProfile();
-  const result = await runDiscoverySweep();
+  const result = await runDiscoverySweep(await db());
   revalidatePath("/discover");
   return result;
 }
@@ -305,7 +330,7 @@ export async function fetchRecommendationsAction(radiusMiles?: number): Promise<
   await requireProfile();
   const key = placesKey();
   if (!key) return { ok: false, error: "GOOGLE_PLACES_API_KEY is not set" };
-  const settings = await db().getSettings();
+  const settings = await (await db()).getSettings();
   if (settings.homeLat === null || settings.homeLng === null) {
     return { ok: false, error: "Set your home location in Settings first." };
   }
@@ -314,7 +339,7 @@ export async function fetchRecommendationsAction(radiusMiles?: number): Promise<
     radiusMiles && radiusMiles > 0
       ? Math.round(Math.min(radiusMiles, 50) * 1609.34)
       : settings.radiusMeters;
-  const restaurants = await db().listRestaurants();
+  const restaurants = await (await db()).listRestaurants();
   try {
     const groups = await findRecommendations(
       restaurants,
@@ -335,7 +360,7 @@ export async function addRecommendationToWishlistAction(place: {
   cuisine: string;
 }): Promise<void> {
   await requireProfile();
-  await db().createRestaurant({
+  await (await db()).createRestaurant({
     name: place.name,
     cuisines: place.cuisine ? [place.cuisine] : [],
     price: 2,
@@ -358,7 +383,7 @@ export async function importTakeoutAction(
   items: TakeoutItem[]
 ): Promise<{ imported: number; skipped: number }> {
   const profile = await requireProfile();
-  const existing = await db().listRestaurants();
+  const existing = await (await db()).listRestaurants();
   const knownIds = new Set(existing.map((r) => r.googlePlaceId).filter(Boolean));
   const knownNames = new Set(existing.map((r) => r.name.toLowerCase()));
 
@@ -371,7 +396,7 @@ export async function importTakeoutAction(
       skipped++;
       continue;
     }
-    const created = await db().createRestaurant({
+    const created = await (await db()).createRestaurant({
       name: item.name,
       cuisines: [],
       price: 2,
@@ -386,7 +411,7 @@ export async function importTakeoutAction(
       notes: null,
     });
     if (item.starRating !== null) {
-      await db().setRating(created.id, profile.id, starToScore(item.starRating));
+      await (await db()).setRating(created.id, profile.id, starToScore(item.starRating));
     }
     knownNames.add(item.name.toLowerCase());
     if (item.placeId) knownIds.add(item.placeId);
@@ -435,7 +460,7 @@ export async function saveLocationAction(
     return { ok: false, message: "Enter a ZIP code (or coordinates under Advanced)." };
   }
 
-  await db().saveSettings(settings);
+  await (await db()).saveSettings(settings);
   revalidatePath("/settings");
   revalidatePath("/discover");
   return { ok: true, message: `Home set to ${settings.homeLabel} ✓` };

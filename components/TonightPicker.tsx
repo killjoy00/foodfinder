@@ -19,7 +19,7 @@ import { Chip, Segmented } from "./ui";
 
 type Phase = "idle" | "spinning" | "result";
 
-const NEAR_ME_CHOICES = [3, 5, 10, 25];
+const NEAR_ME_CHOICES = [1, 3, 5, 10];
 
 export function TonightPicker({
   restaurants,
@@ -225,7 +225,12 @@ export function TonightPicker({
 
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-            Adventure level — {filters.wishlistPercent}% chance of somewhere new
+            Adventure level —{" "}
+            {filters.wishlistPercent === 0
+              ? "always a regular spot"
+              : filters.wishlistPercent === 100
+                ? "only wishlist places 🎈"
+                : `${filters.wishlistPercent}% chance of a wishlist place`}
           </span>
           <input
             type="range"
@@ -234,10 +239,15 @@ export function TonightPicker({
             step={5}
             value={filters.wishlistPercent}
             onChange={(e) =>
-              setFilters({ ...filters, wishlistPercent: parseInt(e.target.value, 10) })
+              setFilters({ ...filters, wishlistPercent: parseInt(e.target.value, 10), excludeIds: [] })
             }
             className="accent-orange-500"
           />
+          {wishlist.length === 0 && filters.wishlistPercent > 0 && (
+            <span className="text-xs text-yellow-300">
+              No wishlist places match your filters — add some (⭐ on a restaurant) for this to do anything.
+            </span>
+          )}
         </label>
 
         <div className="flex flex-col gap-2">

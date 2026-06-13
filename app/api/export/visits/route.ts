@@ -8,8 +8,8 @@ export async function GET() {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
   const [visits, restaurants] = await Promise.all([
-    db().listRecentVisits(10000),
-    db().listRestaurants(),
+    (await db()).listRecentVisits(10000),
+    (await db()).listRestaurants(),
   ]);
   const names = new Map(restaurants.map((r) => [r.id, r.name]));
   return new NextResponse(visitsCsv(visits, names), {

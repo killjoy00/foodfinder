@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ProfilesPage() {
   if (!(await isAuthed())) redirect("/login");
-  const profiles = await db().listProfiles();
+  const profiles = await (await db()).listProfiles();
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-8 p-6">

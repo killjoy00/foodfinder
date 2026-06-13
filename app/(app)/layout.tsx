@@ -1,18 +1,19 @@
 import Link from "next/link";
-import { requireProfile, passwordRequired } from "@/lib/auth";
+import { getActiveHousehold, requireProfile } from "@/lib/auth";
 import { isDemoMode } from "@/lib/data";
 import { switchProfileAction } from "@/app/actions";
 import { NavTabs } from "@/components/NavTabs";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const profile = await requireProfile();
+  const [profile, household] = await Promise.all([requireProfile(), getActiveHousehold()]);
   const demo = isDemoMode();
 
   return (
     <div className="mx-auto flex min-h-dvh max-w-2xl flex-col">
       <header className="flex items-center justify-between px-4 pb-2 pt-4">
-        <Link href="/" className="flex items-center gap-2 text-lg font-bold tracking-tight">
-          <span className="text-2xl">🍽️</span> FoodFinder
+        <Link href="/" className="flex min-w-0 items-center gap-2 text-lg font-bold tracking-tight">
+          <span className="text-2xl">🍽️</span>
+          <span className="truncate">{household?.name ?? "FoodFinder"}</span>
         </Link>
         <form action={switchProfileAction}>
           <button
@@ -33,8 +34,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
       {demo && (
         <p className="mx-4 mb-2 rounded-xl border border-yellow-700 bg-yellow-950/50 px-3 py-2 text-xs text-yellow-200">
-          Demo mode — sample data, nothing is saved permanently. Connect Supabase (see DEPLOY.md){" "}
-          {passwordRequired() ? "" : "and set FAMILY_PASSWORD "}to go live.
+          Demo mode — sample data for the “Demo Family” group, nothing is saved permanently. Connect
+          Supabase (see DEPLOY.md) to go live with real groups.
         </p>
       )}
 

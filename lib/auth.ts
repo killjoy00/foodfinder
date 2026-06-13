@@ -1,39 +1,71 @@
 import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { db } from "./data";
-import { Profile } from "./types";
+import { DEMO_HOUSEHOLD_ID, db, isDemoMode, registry } from "./data";
+import {
+  clearActiveHousehold,
+  getActiveHouseholdId,
+  setActiveHousehold,
+} from "./household";
+import { Household, Profile } from "./types";
 
-const AUTH_COOKIE = "ff_auth";
 const PROFILE_COOKIE = "ff_profile";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // a year — it's a family app
+const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 function passwordHash(password: string): string {
   return createHash("sha256").update(`foodfinder:${password}`).digest("hex");
 }
 
-/** No FAMILY_PASSWORD env var → no password gate (demo / trusted setup). */
-export function passwordRequired(): boolean {
-  return !!process.env.FAMILY_PASSWORD;
-}
+// ---------- households (groups) ----------
 
 export async function isAuthed(): Promise<boolean> {
-  if (!passwordRequired()) return true;
-  const jar = await cookies();
-  return jar.get(AUTH_COOKIE)?.value === passwordHash(process.env.FAMILY_PASSWORD!);
+  if (isDemoMode()) return true;
+  return (await getActiveHouseholdId()) !== null;
 }
 
-export async function login(password: string): Promise<boolean> {
-  if (password !== process.env.FAMILY_PASSWORD) return false;
-  const jar = await cookies();
-  jar.set(AUTH_COOKIE, passwordHash(password), {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: COOKIE_MAX_AGE,
-    path: "/",
-  });
+export async function getActiveHousehold(): Promise<Household | null> {
+  const id = (await getActiveHouseholdId()) ?? (isDemoMode() ? DEMO_HOUSEHOLD_ID : null);
+  if (!id) return null;
+  return registry().getHousehold(id);
+}
+
+export async function loginToHousehold(name: string, password: string): Promise<boolean> {
+  if (isDemoMode()) {
+    await setActiveHousehold(DEMO_HOUSEHOLD_ID);
+    return true;
+  }
+  const household = await registry().findHouseholdByName(name);
+  if (!household || household.passwordHash !== passwordHash(password)) return false;
+  await setActiveHousehold(household.id);
+  await clearActiveProfile(); // don't carry a profile over from another group
   return true;
 }
+
+export async function createHousehold(
+  name: string,
+  password: string
+): Promise<{ ok: boolean; error?: string }> {
+  const trimmed = name.trim();
+  if (trimmed.length < 2) return { ok: false, error: "Pick a group name (2+ characters)." };
+  if (password.length < 4) return { ok: false, error: "Pick a password (4+ characters)." };
+  if (isDemoMode()) {
+    await setActiveHousehold(DEMO_HOUSEHOLD_ID);
+    return { ok: true };
+  }
+  const existing = await registry().findHouseholdByName(trimmed);
+  if (existing) return { ok: false, error: "That group name is already taken." };
+  const household = await registry().createHousehold(trimmed, passwordHash(password));
+  await setActiveHousehold(household.id);
+  await clearActiveProfile();
+  return { ok: true };
+}
+
+export async function logout(): Promise<void> {
+  await clearActiveProfile();
+  await clearActiveHousehold();
+}
+
+// ---------- profiles (within a group) ----------
 
 export async function setActiveProfile(profileId: string): Promise<void> {
   const jar = await cookies();
@@ -54,13 +86,14 @@ export async function getActiveProfile(): Promise<Profile | null> {
   const jar = await cookies();
   const id = jar.get(PROFILE_COOKIE)?.value;
   if (!id) return null;
-  const profiles = await db().listProfiles();
+  // scoped to the active household, so a foreign profile id won't resolve
+  const profiles = await (await db()).listProfiles();
   return profiles.find((p) => p.id === id) ?? null;
 }
 
 /**
- * Guard for app pages: bounce to the password gate, then the profile
- * picker, before letting anyone in. Returns the active profile.
+ * Guard for app pages: require a logged-in group, then a chosen profile.
+ * Returns the active profile.
  */
 export async function requireProfile(): Promise<Profile> {
   if (!(await isAuthed())) redirect("/login");

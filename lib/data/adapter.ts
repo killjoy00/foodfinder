@@ -1,5 +1,6 @@
 import {
   Discovery,
+  Household,
   Profile,
   Restaurant,
   RestaurantFull,
@@ -13,6 +14,16 @@ import {
 export type NewRestaurant = Omit<Restaurant, "id" | "createdAt">;
 
 export type DiscoveryInput = Omit<Discovery, "foundAt" | "dismissed">;
+
+export type HouseholdAuth = { id: string; name: string; passwordHash: string };
+
+/** Tenant registry — NOT scoped to a single household. Used by auth only. */
+export interface HouseholdRegistry {
+  createHousehold(name: string, passwordHash: string): Promise<Household>;
+  findHouseholdByName(name: string): Promise<HouseholdAuth | null>;
+  getHousehold(id: string): Promise<Household | null>;
+  listHouseholds(): Promise<Household[]>;
+}
 
 export interface DataAdapter {
   // profiles

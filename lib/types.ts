@@ -1,3 +1,8 @@
+export type Household = {
+  id: string;
+  name: string;
+};
+
 export type Profile = {
   id: string;
   name: string;
@@ -17,6 +22,7 @@ export const TAGS = [
   "reservations",
   "date_night",
   "healthy",
+  "dessert",
 ] as const;
 export type Tag = (typeof TAGS)[number];
 
@@ -27,6 +33,7 @@ export const TAG_LABELS: Record<Tag, string> = {
   reservations: "Takes reservations",
   date_night: "Date night",
   healthy: "Healthy",
+  dessert: "Dessert",
 };
 
 export type Restaurant = {

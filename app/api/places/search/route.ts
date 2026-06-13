@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   if (!q || q.length < 3) return NextResponse.json({ places: [] });
 
-  const settings = await db().getSettings();
+  const settings = await (await db()).getSettings();
   const bias =
     settings.homeLat !== null && settings.homeLng !== null
       ? { lat: settings.homeLat, lng: settings.homeLng, radiusMeters: settings.radiusMeters }

@@ -6,7 +6,7 @@ import { DuplicatesClient } from "@/components/DuplicatesClient";
 export const dynamic = "force-dynamic";
 
 export default async function DuplicatesPage() {
-  const restaurants = await db().listRestaurants();
+  const restaurants = await (await db()).listRestaurants();
   const pairs = findDuplicatePairs(restaurants).map((p) => ({
     a: summarize(p.a),
     b: summarize(p.b),

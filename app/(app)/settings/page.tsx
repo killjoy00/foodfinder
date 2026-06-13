@@ -1,15 +1,19 @@
 import Link from "next/link";
-import { deleteProfileAction, updateProfileAction } from "@/app/actions";
+import { deleteProfileAction, logoutAction, updateProfileAction } from "@/app/actions";
 import { LocationForm } from "@/components/LocationForm";
 import { ProfileEditor } from "@/components/ProfileEditor";
-import { passwordRequired } from "@/lib/auth";
+import { getActiveHousehold } from "@/lib/auth";
 import { db, isDemoMode } from "@/lib/data";
 import { placesKey } from "@/lib/places";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const [settings, profiles] = await Promise.all([db().getSettings(), db().listProfiles()]);
+  const [settings, profiles, household] = await Promise.all([
+    (await db()).getSettings(),
+    (await db()).listProfiles(),
+    getActiveHousehold(),
+  ]);
 
   return (
     <div className="flex flex-col gap-5 pt-2">
@@ -79,11 +83,23 @@ export default async function SettingsPage() {
         </Link>
       </section>
 
+      <section className="flex flex-col gap-3 rounded-2xl border border-border-soft bg-surface p-4">
+        <h2 className="font-bold">Group</h2>
+        <p className="text-sm text-muted">
+          You&apos;re in <strong className="text-foreground">{household?.name ?? "—"}</strong>. Share
+          the group name and password to let other family in; they each pick their own profile.
+        </p>
+        <form action={logoutAction}>
+          <button className="w-full rounded-xl border border-border-soft px-4 py-2 text-sm font-semibold">
+            Log out / switch group
+          </button>
+        </form>
+      </section>
+
       <section className="rounded-2xl border border-border-soft bg-surface p-4 text-sm">
         <h2 className="mb-2 font-bold">System status</h2>
         <ul className="flex flex-col gap-1 text-muted">
           <li>{isDemoMode() ? "🟡 Demo mode — Supabase not connected" : "🟢 Database connected"}</li>
-          <li>{passwordRequired() ? "🟢 Family password set" : "🟡 No family password (open access)"}</li>
           <li>
             {placesKey()
               ? "🟢 Google Places key set — discovery & recommendations on"
