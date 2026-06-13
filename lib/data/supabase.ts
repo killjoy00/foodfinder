@@ -86,10 +86,33 @@ function makeClient(url: string, key: string): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-async function unwrap<T>(p: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+async function unwrap<T>(
+  p: PromiseLike<{ data: T; error: PostgrestErrorLike | null }>
+): Promise<T> {
   const { data, error } = await p;
-  if (error) throw new Error(`Database error: ${error.message}`);
+  if (error) {
+    const parts = [error.message, error.details, error.hint, error.code && `(${error.code})`].filter(
+      Boolean
+    );
+    throw new Error(`Database error: ${parts.join(" | ") || "unknown"}`);
+  }
   return data;
+}
+
+type PostgrestErrorLike = {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+};
+
+/** PostgREST puts every value in the URL, so a big IN(...) can overflow it. */
+const IN_CHUNK = 150;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 export class SupabaseRegistry implements HouseholdRegistry {
@@ -195,28 +218,35 @@ export class SupabaseAdapter implements DataAdapter {
   private async enrich(links: Row[]): Promise<RestaurantFull[]> {
     if (links.length === 0) return [];
     const ids = links.map((l) => l.restaurant_id);
-    const [catalogRows, members] = await Promise.all([
-      unwrap(this.client.from("restaurants").select("*").in("id", ids)),
-      this.memberIds(),
-    ]);
-    const [ratingRows, visitRows] = await Promise.all([
-      members.length
-        ? unwrap(
+    const members = await this.memberIds();
+
+    // Fetch in chunks so a long restaurant list doesn't overflow the request URL.
+    const catalogRows: Row[] = [];
+    const ratingRows: Row[] = [];
+    const visitRows: Row[] = [];
+    for (const part of chunk(ids, IN_CHUNK)) {
+      catalogRows.push(...((await unwrap(this.client.from("restaurants").select("*").in("id", part))) ?? []));
+      visitRows.push(
+        ...((await unwrap(
+          this.client
+            .from("visits")
+            .select("restaurant_id, date")
+            .eq("household_id", this.hid)
+            .in("restaurant_id", part)
+        )) ?? [])
+      );
+      if (members.length) {
+        ratingRows.push(
+          ...((await unwrap(
             this.client
               .from("ratings")
               .select("restaurant_id, profile_id, score")
-              .in("restaurant_id", ids)
+              .in("restaurant_id", part)
               .in("profile_id", members)
-          )
-        : Promise.resolve([] as Row[]),
-      unwrap(
-        this.client
-          .from("visits")
-          .select("restaurant_id, date")
-          .eq("household_id", this.hid)
-          .in("restaurant_id", ids)
-      ),
-    ]);
+          )) ?? [])
+        );
+      }
+    }
 
     const catalogById = new Map((catalogRows ?? []).map((r: Row) => [r.id, rowToCatalog(r)]));
     const ratingsByR = new Map<string, Record<string, number>>();
