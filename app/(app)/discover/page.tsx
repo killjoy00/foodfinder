@@ -11,6 +11,7 @@ export default async function DiscoverPage() {
       discoveries={discoveries}
       hasKey={!!placesKey()}
       hasHome={settings.homeLat !== null && settings.homeLng !== null}
+      defaultRadiusMiles={Math.round(settings.radiusMeters / 1609.34)}
     />
   );
 }

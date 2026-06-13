@@ -272,7 +272,7 @@ export type RecommendationGroup = {
   }[];
 };
 
-export async function fetchRecommendationsAction(): Promise<
+export async function fetchRecommendationsAction(radiusMiles?: number): Promise<
   { ok: true; groups: RecommendationGroup[] } | { ok: false; error: string }
 > {
   await requireProfile();
@@ -282,11 +282,16 @@ export async function fetchRecommendationsAction(): Promise<
   if (settings.homeLat === null || settings.homeLng === null) {
     return { ok: false, error: "Set your home location in Settings first." };
   }
+  // a per-search radius overrides the saved default when provided
+  const radiusMeters =
+    radiusMiles && radiusMiles > 0
+      ? Math.round(Math.min(radiusMiles, 50) * 1609.34)
+      : settings.radiusMeters;
   const restaurants = await db().listRestaurants();
   try {
     const groups = await findRecommendations(
       restaurants,
-      { lat: settings.homeLat, lng: settings.homeLng, radiusMeters: settings.radiusMeters },
+      { lat: settings.homeLat, lng: settings.homeLng, radiusMeters },
       key
     );
     return { ok: true, groups };

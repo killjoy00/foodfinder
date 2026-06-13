@@ -11,28 +11,37 @@ import {
   runSweepAction,
 } from "@/app/actions";
 import { Discovery } from "@/lib/types";
+import { Segmented } from "./ui";
+
+const RADIUS_CHOICES = [2, 5, 10, 25];
 
 export function DiscoverClient({
   discoveries,
   hasKey,
   hasHome,
+  defaultRadiusMiles,
 }: {
   discoveries: Discovery[];
   hasKey: boolean;
   hasHome: boolean;
+  defaultRadiusMiles: number;
 }) {
   const [pending, startTransition] = useTransition();
   const [recs, setRecs] = useState<RecommendationGroup[] | null>(null);
   const [recError, setRecError] = useState<string | null>(null);
   const [sweepMsg, setSweepMsg] = useState<string | null>(null);
   const [addedRecs, setAddedRecs] = useState<Set<string>>(new Set());
+  const [radiusMiles, setRadiusMiles] = useState(
+    RADIUS_CHOICES.includes(defaultRadiusMiles) ? defaultRadiusMiles : 5
+  );
 
   const ready = hasKey && hasHome;
 
   function loadRecs() {
     setRecError(null);
+    setRecs(null);
     startTransition(async () => {
-      const result = await fetchRecommendationsAction();
+      const result = await fetchRecommendationsAction(radiusMiles);
       if (result.ok) setRecs(result.groups);
       else setRecError(result.error);
     });
@@ -133,13 +142,29 @@ export function DiscoverClient({
         <p className="text-sm text-muted">
           Based on the cuisines and price range your ratings show you love.
         </p>
-        {ready && recs === null && (
+        {ready && (
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+              How far to look
+            </span>
+            <Segmented
+              options={RADIUS_CHOICES.map((mi) => ({ label: `${mi} mi`, value: mi }))}
+              value={radiusMiles}
+              onChange={setRadiusMiles}
+            />
+          </div>
+        )}
+        {ready && (
           <button
             onClick={loadRecs}
             disabled={pending}
             className="rounded-xl bg-accent px-4 py-3 font-bold text-black disabled:opacity-50"
           >
-            {pending ? "Asking Google…" : "🔮 Find recommendations"}
+            {pending
+              ? "Asking Google…"
+              : recs === null
+                ? "🔮 Find recommendations"
+                : `🔄 Refresh within ${radiusMiles} mi`}
           </button>
         )}
         {recError && <p className="text-sm text-red-400">{recError}</p>}

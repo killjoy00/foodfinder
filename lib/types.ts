@@ -113,10 +113,24 @@ export function mapsLink(r: Pick<Restaurant, "name" | "address" | "mapsUrl" | "g
   return `https://www.google.com/maps/search/?api=1&query=${query}`;
 }
 
-/** OpenTable search deep link (works without any API). */
-export function openTableLink(r: Pick<Restaurant, "name" | "reserveUrl">): string {
+/**
+ * OpenTable search deep link (works without any API). When we know where
+ * the restaurant is, bias the search to that spot so "Pasta Fresca"
+ * resolves to the one near you instead of every Pasta Fresca nationwide.
+ */
+export function openTableLink(
+  r: Pick<Restaurant, "name" | "reserveUrl" | "lat" | "lng" | "address">
+): string {
   if (r.reserveUrl) return r.reserveUrl;
-  return `https://www.opentable.com/s?term=${encodeURIComponent(r.name)}`;
+  const params = new URLSearchParams();
+  const hasCoords = r.lat !== null && r.lng !== null;
+  // with coords we lean on lat/long; without, fold the address into the term
+  params.set("term", hasCoords ? r.name : [r.name, r.address].filter(Boolean).join(" "));
+  if (hasCoords) {
+    params.set("latitude", String(r.lat));
+    params.set("longitude", String(r.lng));
+  }
+  return `https://www.opentable.com/s?${params.toString()}`;
 }
 
 export function daysSince(iso: string | null, now: Date = new Date()): number | null {
