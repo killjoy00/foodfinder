@@ -23,9 +23,9 @@ create table if not exists households (
 -- create your default group (only if none exists yet)
 insert into households (name, name_key, password_hash)
 select
-  'My Family',                                                  -- ⬅️ EDIT: your group name
-  lower('My Family'),                                           -- ⬅️ EDIT: same name, lowercased
-  encode(digest('foodfinder:' || 'CHANGE_THIS_PASSWORD', 'sha256'), 'hex')  -- ⬅️ EDIT: your password
+  'Mindells',                                                 
+  lower('mindells'),                                      
+  encode(digest('foodfinder:' || 'foodfun', 'sha256'), 'hex') 
 where not exists (select 1 from households);
 
 create table if not exists group_restaurants (
