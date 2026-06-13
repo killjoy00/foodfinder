@@ -1,10 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useMemo, useState, useTransition } from "react";
 import { logVisitAction, setStatusAction } from "@/app/actions";
 import { PRICE_LABELS, RestaurantFull, daysSince } from "@/lib/types";
+import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { Chip } from "./ui";
+
+const MapView = dynamic(() => import("./MapView"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[60vh] items-center justify-center rounded-2xl border border-border-soft text-muted">
+      Loading map…
+    </div>
+  ),
+});
 
 type SortKey = "name" | "rating" | "recency";
 
@@ -13,12 +24,20 @@ function avgRating(r: RestaurantFull): number {
   return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
 }
 
-export function RestaurantList({ restaurants }: { restaurants: RestaurantFull[] }) {
+export function RestaurantList({
+  restaurants,
+  home,
+}: {
+  restaurants: RestaurantFull[];
+  home: LatLng;
+}) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("name");
   const [view, setView] = useState<"active" | "wishlist">("active");
+  const [mode, setMode] = useState<"list" | "map">("list");
   const [pending, startTransition] = useTransition();
   const [loggedId, setLoggedId] = useState<string | null>(null);
+  const hasHome = home.lat !== null && home.lng !== null;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -43,20 +62,41 @@ export function RestaurantList({ restaurants }: { restaurants: RestaurantFull[] 
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Our places</h1>
-        <Link
-          href="/restaurants/new"
-          className="rounded-xl bg-accent px-4 py-2 font-bold text-black"
-        >
-          + Add
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setMode(mode === "list" ? "map" : "list")}
+            className="rounded-xl border border-border-soft bg-surface-2 px-3 py-2 text-sm font-semibold"
+          >
+            {mode === "list" ? "🗺️ Map" : "📋 List"}
+          </button>
+          <Link
+            href="/restaurants/new"
+            className="rounded-xl bg-accent px-4 py-2 font-bold text-black"
+          >
+            + Add
+          </Link>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <Link href="/restaurants/duplicates" className="text-sm text-accent underline">
+          🔁 Find duplicates
+        </Link>
+        <Link href="/insights" className="text-sm text-accent underline">
+          📊 Insights
         </Link>
       </div>
 
-      <input
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search name or cuisine…"
-        className="rounded-xl border border-border-soft bg-surface px-4 py-2.5 outline-none focus:border-accent"
-      />
+      {mode === "map" ? (
+        <MapView restaurants={restaurants} home={home} />
+      ) : (
+        <>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search name or cuisine…"
+            className="rounded-xl border border-border-soft bg-surface px-4 py-2.5 outline-none focus:border-accent"
+          />
 
       <div className="flex flex-wrap gap-2">
         <Chip active={view === "active"} onClick={() => setView("active")}>
@@ -81,6 +121,7 @@ export function RestaurantList({ restaurants }: { restaurants: RestaurantFull[] 
         {shown.map((r) => {
           const days = daysSince(r.lastVisitAt);
           const avg = avgRating(r);
+          const dist = hasHome ? formatMiles(distanceMiles(home, r)) : null;
           return (
             <li
               key={r.id}
@@ -91,6 +132,7 @@ export function RestaurantList({ restaurants }: { restaurants: RestaurantFull[] 
                 <p className="truncate text-sm text-muted">
                   {r.cuisines.join(" · ") || "uncategorized"} · {PRICE_LABELS[r.price - 1]}
                   {avg > 0 && ` · ★ ${avg.toFixed(1)}`}
+                  {dist && ` · ${dist}`}
                   {days !== null && ` · ${days}d ago`}
                 </p>
               </Link>
@@ -133,6 +175,8 @@ export function RestaurantList({ restaurants }: { restaurants: RestaurantFull[] 
           </li>
         )}
       </ul>
+        </>
+      )}
     </div>
   );
 }

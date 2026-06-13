@@ -31,10 +31,10 @@ function daysAgo(n: number): string {
 
 function seedStore(): Store {
   const profiles: Profile[] = [
-    { id: "p1", name: "Mom", emoji: "🦊", color: "#f97316" },
-    { id: "p2", name: "Dad", emoji: "🐻", color: "#3b82f6" },
-    { id: "p3", name: "Riley", emoji: "🐸", color: "#22c55e" },
-    { id: "p4", name: "Jordan", emoji: "🦄", color: "#a855f7" },
+    { id: "p1", name: "Mom", emoji: "🦊", color: "#f97316", doubleCredits: 0 },
+    { id: "p2", name: "Dad", emoji: "🐻", color: "#3b82f6", doubleCredits: 0 },
+    { id: "p3", name: "Riley", emoji: "🐸", color: "#22c55e", doubleCredits: 0 },
+    { id: "p4", name: "Jordan", emoji: "🦄", color: "#a855f7", doubleCredits: 0 },
   ];
 
   const mk = (
@@ -175,9 +175,14 @@ export class MemoryAdapter implements DataAdapter {
   }
 
   async createProfile(name: string, emoji: string, color: string): Promise<Profile> {
-    const profile: Profile = { id: randomUUID(), name, emoji, color };
+    const profile: Profile = { id: randomUUID(), name, emoji, color, doubleCredits: 0 };
     store().profiles.push(profile);
     return profile;
+  }
+
+  async setDoubleCredits(profileId: string, credits: number): Promise<void> {
+    const p = store().profiles.find((x) => x.id === profileId);
+    if (p) p.doubleCredits = Math.max(0, credits);
   }
 
   async updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void> {
@@ -220,6 +225,41 @@ export class MemoryAdapter implements DataAdapter {
     s.restaurants = s.restaurants.filter((x) => x.id !== id);
     s.ratings = s.ratings.filter((x) => x.restaurantId !== id);
     s.visits = s.visits.filter((x) => x.restaurantId !== id);
+  }
+
+  async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
+    const s = store();
+    const survivor = s.restaurants.find((x) => x.id === survivorId);
+    const loser = s.restaurants.find((x) => x.id === loserId);
+    if (!survivor || !loser || survivorId === loserId) return;
+
+    // union cuisines + tags, fill blank survivor fields from the loser
+    survivor.cuisines = [...new Set([...survivor.cuisines, ...loser.cuisines])];
+    survivor.tags = [...new Set([...survivor.tags, ...loser.tags])];
+    survivor.address ??= loser.address;
+    survivor.lat ??= loser.lat;
+    survivor.lng ??= loser.lng;
+    survivor.googlePlaceId ??= loser.googlePlaceId;
+    survivor.mapsUrl ??= loser.mapsUrl;
+    survivor.reserveUrl ??= loser.reserveUrl;
+    if (!survivor.notes) survivor.notes = loser.notes;
+    // a wishlist + a visited place merge to visited
+    if (loser.status === "active") survivor.status = "active";
+
+    // move visits
+    for (const v of s.visits) if (v.restaurantId === loserId) v.restaurantId = survivorId;
+
+    // keep survivor ratings; adopt the loser's only where survivor has none
+    for (const rating of s.ratings) {
+      if (rating.restaurantId !== loserId) continue;
+      const exists = s.ratings.some(
+        (x) => x.restaurantId === survivorId && x.profileId === rating.profileId
+      );
+      if (exists) continue;
+      rating.restaurantId = survivorId;
+    }
+    s.ratings = s.ratings.filter((x) => x.restaurantId !== loserId);
+    s.restaurants = s.restaurants.filter((x) => x.id !== loserId);
   }
 
   async setRating(restaurantId: string, profileId: string, score: number): Promise<void> {
@@ -285,11 +325,12 @@ export class MemoryAdapter implements DataAdapter {
     sessionId: string,
     profileId: string,
     pickId: string | null,
-    vetoId: string | null
+    vetoId: string | null,
+    deferred: boolean
   ): Promise<void> {
     const s = store();
     s.votes = s.votes.filter((v) => !(v.sessionId === sessionId && v.profileId === profileId));
-    s.votes.push({ sessionId, profileId, pickId, vetoId });
+    s.votes.push({ sessionId, profileId, pickId, vetoId, deferred });
   }
 
   async closeVoteSession(sessionId: string, winnerId: string | null): Promise<void> {

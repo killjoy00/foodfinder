@@ -91,14 +91,26 @@ export class SupabaseAdapter implements DataAdapter {
     const rows = await this.unwrap(
       this.client.from("profiles").select("*").order("created_at", { ascending: true })
     );
-    return (rows ?? []).map((r: Row) => ({ id: r.id, name: r.name, emoji: r.emoji, color: r.color }));
+    return (rows ?? []).map((r: Row) => ({
+      id: r.id,
+      name: r.name,
+      emoji: r.emoji,
+      color: r.color,
+      doubleCredits: r.double_credits ?? 0,
+    }));
   }
 
   async createProfile(name: string, emoji: string, color: string): Promise<Profile> {
     const row = await this.unwrap(
       this.client.from("profiles").insert({ name, emoji, color }).select().single()
     );
-    return { id: row.id, name: row.name, emoji: row.emoji, color: row.color };
+    return { id: row.id, name: row.name, emoji: row.emoji, color: row.color, doubleCredits: 0 };
+  }
+
+  async setDoubleCredits(profileId: string, credits: number): Promise<void> {
+    await this.unwrap(
+      this.client.from("profiles").update({ double_credits: Math.max(0, credits) }).eq("id", profileId)
+    );
   }
 
   async updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void> {
@@ -174,6 +186,53 @@ export class SupabaseAdapter implements DataAdapter {
 
   async deleteRestaurant(id: string): Promise<void> {
     await this.unwrap(this.client.from("restaurants").delete().eq("id", id));
+  }
+
+  async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
+    if (survivorId === loserId) return;
+    const [survivor, loser] = await Promise.all([
+      this.unwrap(this.client.from("restaurants").select("*").eq("id", survivorId).maybeSingle()),
+      this.unwrap(this.client.from("restaurants").select("*").eq("id", loserId).maybeSingle()),
+    ]);
+    if (!survivor || !loser) return;
+
+    // free up the loser's unique google_place_id before the survivor adopts it
+    if (!survivor.google_place_id && loser.google_place_id) {
+      await this.unwrap(
+        this.client.from("restaurants").update({ google_place_id: null }).eq("id", loserId)
+      );
+    }
+
+    const merged: Row = {
+      cuisines: [...new Set([...(survivor.cuisines ?? []), ...(loser.cuisines ?? [])])],
+      tags: [...new Set([...(survivor.tags ?? []), ...(loser.tags ?? [])])],
+      address: survivor.address ?? loser.address,
+      lat: survivor.lat ?? loser.lat,
+      lng: survivor.lng ?? loser.lng,
+      google_place_id: survivor.google_place_id ?? loser.google_place_id,
+      maps_url: survivor.maps_url ?? loser.maps_url,
+      reserve_url: survivor.reserve_url ?? loser.reserve_url,
+      notes: survivor.notes || loser.notes,
+      status: survivor.status === "active" || loser.status === "active" ? "active" : survivor.status,
+    };
+    await this.unwrap(this.client.from("restaurants").update(merged).eq("id", survivorId));
+
+    // move visits over
+    await this.unwrap(
+      this.client.from("visits").update({ restaurant_id: survivorId }).eq("restaurant_id", loserId)
+    );
+
+    // adopt the loser's ratings only for profiles the survivor hasn't rated
+    const survivorRatings = await this.unwrap(
+      this.client.from("ratings").select("profile_id").eq("restaurant_id", survivorId)
+    );
+    const taken = (survivorRatings ?? []).map((r: Row) => r.profile_id);
+    let move = this.client.from("ratings").update({ restaurant_id: survivorId }).eq("restaurant_id", loserId);
+    if (taken.length > 0) move = move.not("profile_id", "in", `(${taken.join(",")})`);
+    await this.unwrap(move);
+
+    // deleting the loser cascade-drops any leftover (duplicate) ratings/visits
+    await this.unwrap(this.client.from("restaurants").delete().eq("id", loserId));
   }
 
   async setRating(restaurantId: string, profileId: string, score: number): Promise<void> {
@@ -264,6 +323,7 @@ export class SupabaseAdapter implements DataAdapter {
       profileId: r.profile_id,
       pickId: r.pick_id,
       vetoId: r.veto_id,
+      deferred: r.deferred ?? false,
     }));
   }
 
@@ -271,11 +331,18 @@ export class SupabaseAdapter implements DataAdapter {
     sessionId: string,
     profileId: string,
     pickId: string | null,
-    vetoId: string | null
+    vetoId: string | null,
+    deferred: boolean
   ): Promise<void> {
     await this.unwrap(
       this.client.from("votes").upsert(
-        { session_id: sessionId, profile_id: profileId, pick_id: pickId, veto_id: vetoId },
+        {
+          session_id: sessionId,
+          profile_id: profileId,
+          pick_id: pickId,
+          veto_id: vetoId,
+          deferred,
+        },
         { onConflict: "session_id,profile_id" }
       )
     );

@@ -11,6 +11,7 @@ import {
   wheelSegments,
 } from "@/lib/picker";
 import { Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
+import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { logVisitAction, startVoteAction } from "@/app/actions";
 import { SpinWheel } from "./SpinWheel";
 import { ResultCard } from "./ResultCard";
@@ -18,16 +19,20 @@ import { Chip, Segmented } from "./ui";
 
 type Phase = "idle" | "spinning" | "result";
 
+const NEAR_ME_CHOICES = [3, 5, 10, 25];
+
 export function TonightPicker({
   restaurants,
   profiles,
   recentVisitCuisines,
   allCuisines,
+  home,
 }: {
   restaurants: RestaurantFull[];
   profiles: Profile[];
   recentVisitCuisines: string[][];
   allCuisines: string[];
+  home: LatLng;
 }) {
   const [filters, setFilters] = useState<PickerFilters>(DEFAULT_FILTERS);
   const [phase, setPhase] = useState<Phase>("idle");
@@ -37,20 +42,60 @@ export function TonightPicker({
   const [logged, setLogged] = useState(false);
   const [, startVoteTransition] = useTransition();
 
+  const [nearMe, setNearMe] = useState(false);
+  const [deviceOrigin, setDeviceOrigin] = useState<LatLng | null>(null);
+  const [maxDistance, setMaxDistance] = useState(10);
+  const [geoMsg, setGeoMsg] = useState<string | null>(null);
+
+  // distances are measured from where you are (near-me) or from home
+  const origin: LatLng | null = nearMe && deviceOrigin ? deviceOrigin : home;
+  const hasOrigin = origin?.lat !== null && origin?.lng !== null;
+
+  function distanceOf(r: RestaurantFull): number | null {
+    return distanceMiles(origin, r);
+  }
+
+  // when near-me is on with a fix, drop places that are out of range or unlocated
+  const usable = useMemo(() => {
+    if (!nearMe || !deviceOrigin) return restaurants;
+    return restaurants.filter((r) => {
+      const d = distanceMiles(deviceOrigin, r);
+      return d !== null && d <= maxDistance;
+    });
+  }, [restaurants, nearMe, deviceOrigin, maxDistance]);
+
   const { regulars, wishlist } = useMemo(
-    () => buildCandidates(restaurants, filters, recentVisitCuisines),
-    [restaurants, filters, recentVisitCuisines]
+    () => buildCandidates(usable, filters, recentVisitCuisines),
+    [usable, filters, recentVisitCuisines]
   );
   const eligibleCount = regulars.length + wishlist.length;
+
+  function enableNearMe() {
+    if (!("geolocation" in navigator)) {
+      setGeoMsg("This device can't share its location.");
+      return;
+    }
+    setGeoMsg("Finding you…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setDeviceOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setNearMe(true);
+        setGeoMsg(null);
+        setFilters((f) => ({ ...f, excludeIds: [] }));
+      },
+      () => setGeoMsg("Couldn't get your location — check the browser permission."),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }
 
   function spin(extraExclude?: string) {
     const f = extraExclude
       ? { ...filters, excludeIds: [...filters.excludeIds, extraExclude] }
       : filters;
     if (extraExclude) setFilters(f);
-    const picked = pickTonight(restaurants, f, recentVisitCuisines);
+    const picked = pickTonight(usable, f, recentVisitCuisines);
     if (!picked) return;
-    const pool = [...buildCandidates(restaurants, f, recentVisitCuisines).regulars, ...wishlist];
+    const pool = [...buildCandidates(usable, f, recentVisitCuisines).regulars, ...wishlist];
     setWinner(picked);
     setSegments(wheelSegments(picked, pool.length > 1 ? pool : [picked]));
     setLogged(false);
@@ -195,6 +240,42 @@ export function TonightPicker({
           />
         </label>
 
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">Distance</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => (nearMe ? setNearMe(false) : enableNearMe())}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                nearMe
+                  ? "border-accent bg-accent-soft font-semibold text-orange-200"
+                  : "border-border-soft bg-surface-2 text-muted"
+              }`}
+            >
+              📍 {nearMe ? "Near me now" : "Use my location"}
+            </button>
+            {!hasOrigin && !nearMe && (
+              <span className="text-xs text-muted">set home in Settings to show distances</span>
+            )}
+            {geoMsg && <span className="text-xs text-muted">{geoMsg}</span>}
+          </div>
+          {nearMe && deviceOrigin && (
+            <>
+              <Segmented
+                options={NEAR_ME_CHOICES.map((mi) => ({ label: `${mi} mi`, value: mi }))}
+                value={maxDistance}
+                onChange={(mi) => {
+                  setMaxDistance(mi);
+                  setFilters((f) => ({ ...f, excludeIds: [] }));
+                }}
+              />
+              <p className="text-xs text-muted">
+                {usable.length} place{usable.length === 1 ? "" : "s"} within {maxDistance} mi of you
+              </p>
+            </>
+          )}
+        </div>
+
         <p className="text-xs text-muted">
           {eligibleCount} place{eligibleCount === 1 ? "" : "s"} match
           {eligibleCount === 1 ? "es" : ""} ({wishlist.length} on the wishlist)
@@ -233,6 +314,8 @@ export function TonightPicker({
           onReroll={() => spin(winner.restaurant.id)}
           onStartVote={startVote}
           maxVoteSize={eligibleCount}
+          distanceLabel={formatMiles(distanceOf(winner.restaurant))}
+          distanceFromMe={nearMe && !!deviceOrigin}
         />
       )}
     </div>

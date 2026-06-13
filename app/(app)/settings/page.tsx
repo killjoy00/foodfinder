@@ -68,6 +68,12 @@ export default async function SettingsPage() {
 
       <section className="flex flex-col gap-2 rounded-2xl border border-border-soft bg-surface p-4">
         <h2 className="font-bold">Data</h2>
+        <Link href="/insights" className="text-sm text-accent underline">
+          📊 Your food story (insights) →
+        </Link>
+        <Link href="/restaurants/duplicates" className="text-sm text-accent underline">
+          🔁 Find &amp; merge duplicates →
+        </Link>
         <Link href="/import" className="text-sm text-accent underline">
           Import from Google Takeout / export CSV →
         </Link>

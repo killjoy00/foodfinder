@@ -2,10 +2,11 @@ import { db } from "@/lib/data";
 import { TonightPicker } from "@/components/TonightPicker";
 
 export default async function TonightPage() {
-  const [restaurants, profiles, recentVisits] = await Promise.all([
+  const [restaurants, profiles, recentVisits, settings] = await Promise.all([
     db().listRestaurants(),
     db().listProfiles(),
     db().listRecentVisits(3),
+    db().getSettings(),
   ]);
 
   const byId = new Map(restaurants.map((r) => [r.id, r]));
@@ -18,6 +19,7 @@ export default async function TonightPage() {
       profiles={profiles}
       recentVisitCuisines={recentVisitCuisines}
       allCuisines={allCuisines}
+      home={{ lat: settings.homeLat, lng: settings.homeLng }}
     />
   );
 }

@@ -124,6 +124,14 @@ export async function deleteRestaurantAction(id: string): Promise<void> {
   redirect("/restaurants");
 }
 
+export async function mergeRestaurantsAction(survivorId: string, loserId: string): Promise<void> {
+  await requireProfile();
+  await db().mergeRestaurants(survivorId, loserId);
+  revalidatePath("/restaurants");
+  revalidatePath("/restaurants/duplicates");
+  revalidatePath("/");
+}
+
 export async function setStatusAction(id: string, status: RestaurantStatus): Promise<void> {
   await requireProfile();
   await db().updateRestaurant(id, { status });
@@ -196,13 +204,18 @@ export async function startQuickVoteAction(count: number): Promise<void> {
 export async function castVoteAction(
   sessionId: string,
   pickId: string | null,
-  vetoId: string | null
+  vetoId: string | null,
+  deferred: boolean = false
 ): Promise<void> {
   const profile = await requireProfile();
   const session = await db().getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
-  if (pickId && vetoId && pickId === vetoId) return;
-  await db().castVote(sessionId, profile.id, pickId, vetoId);
+  if (deferred) {
+    await db().castVote(sessionId, profile.id, null, null, true);
+  } else {
+    if (pickId && vetoId && pickId === vetoId) return;
+    await db().castVote(sessionId, profile.id, pickId, vetoId, false);
+  }
   revalidatePath("/vote");
 }
 
@@ -210,9 +223,23 @@ export async function closeVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
   const session = await db().getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
-  const votes = await db().listVotes(sessionId);
-  const winnerId = tallyVotes(session.candidateIds, votes);
+  const [votes, profiles] = await Promise.all([db().listVotes(sessionId), db().listProfiles()]);
+
+  // a banked double-vote credit makes this round's pick count twice
+  const creditOf = new Map(profiles.map((p) => [p.id, p.doubleCredits]));
+  const weightOf = (profileId: string) => ((creditOf.get(profileId) ?? 0) > 0 ? 2 : 1);
+  const winnerId = tallyVotes(session.candidateIds, votes, Math.random, weightOf);
   await db().closeVoteSession(sessionId, winnerId);
+
+  // settle credits: bank one per deferral, spend one when a credit was used
+  for (const v of votes) {
+    const credits = creditOf.get(v.profileId) ?? 0;
+    if (v.deferred) {
+      await db().setDoubleCredits(v.profileId, credits + 1);
+    } else if (v.pickId && credits > 0) {
+      await db().setDoubleCredits(v.profileId, credits - 1);
+    }
+  }
   revalidatePath("/vote");
 }
 

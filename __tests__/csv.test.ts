@@ -15,8 +15,8 @@ describe("csvEscape", () => {
 describe("restaurantsCsv", () => {
   it("produces one row per restaurant with per-profile rating columns", () => {
     const profiles: Profile[] = [
-      { id: "p1", name: "Mom", emoji: "🦊", color: "#fff" },
-      { id: "p2", name: "Dad", emoji: "🐻", color: "#000" },
+      { id: "p1", name: "Mom", emoji: "🦊", color: "#fff", doubleCredits: 0 },
+      { id: "p2", name: "Dad", emoji: "🐻", color: "#000", doubleCredits: 0 },
     ];
     const restaurants: RestaurantFull[] = [
       {

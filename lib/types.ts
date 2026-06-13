@@ -3,6 +3,7 @@ export type Profile = {
   name: string;
   emoji: string;
   color: string;
+  doubleCredits: number; // banked "defer" credits; each makes one future vote count 2x
 };
 
 export type RestaurantStatus = "active" | "wishlist";
@@ -77,6 +78,7 @@ export type Vote = {
   profileId: string;
   pickId: string | null;
   vetoId: string | null;
+  deferred: boolean; // sat this one out to bank a double-strength vote for next time
 };
 
 export type Discovery = {

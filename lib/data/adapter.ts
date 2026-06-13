@@ -27,6 +27,8 @@ export interface DataAdapter {
   createRestaurant(data: NewRestaurant): Promise<Restaurant>;
   updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void>;
   deleteRestaurant(id: string): Promise<void>;
+  /** Fold `loserId` into `survivorId` (visits, ratings, tags, cuisines), then delete the loser. */
+  mergeRestaurants(survivorId: string, loserId: string): Promise<void>;
 
   // ratings
   setRating(restaurantId: string, profileId: string, score: number): Promise<void>;
@@ -42,8 +44,15 @@ export interface DataAdapter {
   getLatestVoteSession(): Promise<VoteSession | null>;
   getVoteSession(id: string): Promise<VoteSession | null>;
   listVotes(sessionId: string): Promise<Vote[]>;
-  castVote(sessionId: string, profileId: string, pickId: string | null, vetoId: string | null): Promise<void>;
+  castVote(
+    sessionId: string,
+    profileId: string,
+    pickId: string | null,
+    vetoId: string | null,
+    deferred: boolean
+  ): Promise<void>;
   closeVoteSession(sessionId: string, winnerId: string | null): Promise<void>;
+  setDoubleCredits(profileId: string, credits: number): Promise<void>;
 
   // discovery feed
   listDiscoveries(): Promise<Discovery[]>;

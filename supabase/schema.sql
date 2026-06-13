@@ -10,6 +10,7 @@ create table if not exists profiles (
   name text not null,
   emoji text not null default '🙂',
   color text not null default '#f97316',
+  double_credits int not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -59,6 +60,7 @@ create table if not exists votes (
   profile_id uuid not null references profiles(id) on delete cascade,
   pick_id uuid,
   veto_id uuid,
+  deferred boolean not null default false,
   primary key (session_id, profile_id)
 );
 

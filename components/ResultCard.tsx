@@ -13,6 +13,8 @@ export function ResultCard({
   onReroll,
   onStartVote,
   maxVoteSize,
+  distanceLabel,
+  distanceFromMe,
 }: {
   candidate: WeightedCandidate;
   profiles: Profile[];
@@ -21,6 +23,8 @@ export function ResultCard({
   onReroll: () => void;
   onStartVote: (count: number) => void;
   maxVoteSize: number;
+  distanceLabel: string | null;
+  distanceFromMe: boolean;
 }) {
   const r = candidate.restaurant;
   const [pending, startTransition] = useTransition();
@@ -36,6 +40,7 @@ export function ResultCard({
         <h2 className="text-3xl font-extrabold leading-tight">{r.name}</h2>
         <p className="mt-1 text-muted">
           {r.cuisines.join(" · ")} {r.cuisines.length > 0 && "·"} {PRICE_LABELS[r.price - 1]}
+          {distanceLabel ? ` · ${distanceLabel}${distanceFromMe ? " away" : " from home"}` : ""}
           {days !== null
             ? ` · last visit ${days === 0 ? "today" : `${days} day${days === 1 ? "" : "s"} ago`}`
             : r.status === "wishlist"

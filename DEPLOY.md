@@ -1,5 +1,11 @@
 # Deploying FoodFinder — one-time setup (~10 minutes)
 
+> **Already deployed? One-time database update for the "defer your vote"
+> feature.** Open Supabase → SQL Editor → New query, paste the contents of
+> `supabase/migrations/0002_vote_defer.sql`, and Run. Until you do, starting
+> or deferring a vote will error; everything else keeps working.
+
+
 After this checklist, every push to the repo deploys automatically and the
 app runs itself. You need: a GitHub account (you have one), and free
 accounts on Supabase and Vercel. No credit card for either.

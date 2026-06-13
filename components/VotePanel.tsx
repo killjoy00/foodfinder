@@ -30,19 +30,39 @@ export function VotePanel({
     return () => clearInterval(timer);
   }, [router]);
 
-  const voted = new Set(votes.map((v) => v.profileId));
+  const voteByProfile = new Map(votes.map((v) => [v.profileId, v]));
   const submitted = !!myVote;
+  const iDeferred = myVote?.deferred ?? false;
+  const hasDouble = activeProfile.doubleCredits > 0;
 
   function submit() {
-    startTransition(() => castVoteAction(session.id, pickId, vetoId));
+    startTransition(() => castVoteAction(session.id, pickId, vetoId, false));
+  }
+
+  function defer() {
+    setPickId(null);
+    setVetoId(null);
+    startTransition(() => castVoteAction(session.id, null, null, true));
   }
 
   return (
     <div className="flex flex-col gap-4 pt-2">
       <h1 className="text-2xl font-bold">Family vote 🗳️</h1>
       <p className="text-sm text-muted">
-        Tap your favorite. Long for a veto? Tap 🚫 on the one you refuse to eat.
+        Tap your favorite, or 🚫 to veto one. Not fussed tonight? Defer to bank a 2× vote for next
+        time.
       </p>
+
+      {hasDouble && !iDeferred && (
+        <p className="rounded-xl border border-accent bg-accent-soft/40 px-3 py-2 text-center text-sm font-semibold text-orange-200">
+          🔥 Your vote counts 2× this round — you deferred last time.
+        </p>
+      )}
+      {iDeferred && (
+        <p className="rounded-xl border border-border-soft bg-surface px-3 py-2 text-center text-sm text-muted">
+          ⏭️ You deferred — you&apos;ll get a 2× vote next round. Tap a restaurant to vote anyway.
+        </p>
+      )}
 
       <div className="flex flex-col gap-3">
         {candidates.map((r) => {
@@ -99,27 +119,44 @@ export function VotePanel({
         })}
       </div>
 
-      <button
-        onClick={submit}
-        disabled={pending || (!pickId && !vetoId)}
-        className="rounded-xl bg-accent px-4 py-3 text-lg font-bold text-black disabled:opacity-40"
-      >
-        {submitted ? "Update my vote" : `Vote as ${activeProfile.emoji} ${activeProfile.name}`}
-      </button>
+      <div className="flex gap-2">
+        <button
+          onClick={submit}
+          disabled={pending || (!pickId && !vetoId)}
+          className="flex-1 rounded-xl bg-accent px-4 py-3 text-lg font-bold text-black disabled:opacity-40"
+        >
+          {submitted && !iDeferred
+            ? "Update my vote"
+            : `Vote as ${activeProfile.emoji} ${activeProfile.name}`}
+        </button>
+        <button
+          onClick={defer}
+          disabled={pending || iDeferred}
+          className="rounded-xl border border-border-soft px-4 py-3 font-semibold text-muted disabled:opacity-40"
+          title="Sit this one out and bank a 2× vote for next time"
+        >
+          ⏭️ Defer
+        </button>
+      </div>
 
       {/* who's voted */}
       <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
         <span>Voted:</span>
-        {profiles.map((p) => (
-          <span
-            key={p.id}
-            className={`rounded-full border px-2 py-0.5 ${
-              voted.has(p.id) ? "border-green-700 text-green-300" : "border-border-soft opacity-50"
-            }`}
-          >
-            {p.emoji} {p.name} {voted.has(p.id) ? "✓" : "…"}
-          </span>
-        ))}
+        {profiles.map((p) => {
+          const v = voteByProfile.get(p.id);
+          const label = !v ? "…" : v.deferred ? "⏭️" : "✓";
+          return (
+            <span
+              key={p.id}
+              className={`rounded-full border px-2 py-0.5 ${
+                v ? "border-green-700 text-green-300" : "border-border-soft opacity-50"
+              }`}
+            >
+              {p.emoji} {p.name} {label}
+              {p.doubleCredits > 0 && " 🔥2×"}
+            </span>
+          );
+        })}
       </div>
 
       <div className="flex gap-2">
