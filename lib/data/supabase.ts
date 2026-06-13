@@ -107,7 +107,7 @@ type PostgrestErrorLike = {
 };
 
 /** PostgREST puts every value in the URL, so a big IN(...) can overflow it. */
-const IN_CHUNK = 150;
+const IN_CHUNK = 100;
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
