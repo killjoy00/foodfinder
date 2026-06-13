@@ -59,12 +59,12 @@ export function VotePanel({
         </p>
       )}
       {iDeferred && (
-        <p className="rounded-xl border border-border-soft bg-surface px-3 py-2 text-center text-sm text-muted">
-          ⏭️ You deferred — you&apos;ll get a 2× vote next round. Tap a restaurant to vote anyway.
+        <p className="rounded-xl border border-border-soft bg-surface px-3 py-2 text-center text-sm font-semibold text-muted">
+          ⏭️ You deferred — you&apos;re out this round, and you&apos;ll get a 2× vote next time.
         </p>
       )}
 
-      <div className="flex flex-col gap-3">
+      <div className={`flex flex-col gap-3 ${iDeferred ? "pointer-events-none opacity-50" : ""}`}>
         {candidates.map((r) => {
           const isPick = pickId === r.id;
           const isVeto = vetoId === r.id;
@@ -82,6 +82,7 @@ export function VotePanel({
             >
               <button
                 className="flex-1 text-left"
+                disabled={iDeferred}
                 onClick={() => {
                   setPickId(isPick ? null : r.id);
                   if (vetoId === r.id) setVetoId(null);
@@ -105,6 +106,7 @@ export function VotePanel({
                 🗺️
               </a>
               <button
+                disabled={iDeferred}
                 onClick={() => {
                   setVetoId(isVeto ? null : r.id);
                   if (pickId === r.id) setPickId(null);
@@ -122,12 +124,14 @@ export function VotePanel({
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={pending || (!pickId && !vetoId)}
+          disabled={pending || iDeferred || (!pickId && !vetoId)}
           className="flex-1 rounded-xl bg-accent px-4 py-3 text-lg font-bold text-black disabled:opacity-40"
         >
-          {submitted && !iDeferred
-            ? "Update my vote"
-            : `Vote as ${activeProfile.emoji} ${activeProfile.name}`}
+          {iDeferred
+            ? "You deferred"
+            : submitted
+              ? "Update my vote"
+              : `Vote as ${activeProfile.emoji} ${activeProfile.name}`}
         </button>
         <button
           onClick={defer}

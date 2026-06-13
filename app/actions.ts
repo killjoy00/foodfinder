@@ -16,6 +16,7 @@ import {
   DEFAULT_FILTERS,
   DEFAULT_VOTE_SIZE,
   buildCandidates,
+  buildCuisineRecency,
   sampleCandidates,
 } from "@/lib/picker";
 import { zipToCoords } from "@/lib/geocode";
@@ -215,11 +216,11 @@ export async function startQuickVoteAction(count: number): Promise<void> {
   const size = Math.min(8, Math.max(2, Math.round(count) || DEFAULT_VOTE_SIZE));
   const [restaurants, recentVisits] = await Promise.all([
     (await db()).listRestaurants(),
-    (await db()).listRecentVisits(3),
+    (await db()).listRecentVisits(50),
   ]);
-  const byId = new Map(restaurants.map((r) => [r.id, r]));
-  const recentCuisines = recentVisits.map((v) => byId.get(v.restaurantId)?.cuisines ?? []);
-  const { regulars, wishlist } = buildCandidates(restaurants, DEFAULT_FILTERS, recentCuisines);
+  const cuisinesByRestaurant = new Map(restaurants.map((r) => [r.id, r.cuisines]));
+  const cuisineRecency = buildCuisineRecency(recentVisits, cuisinesByRestaurant);
+  const { regulars, wishlist } = buildCandidates(restaurants, DEFAULT_FILTERS, cuisineRecency);
   const candidates = sampleCandidates([...regulars, ...wishlist], size);
   if (candidates.length < 2) return;
   await (await db()).createVoteSession(candidates.map((c) => c.restaurant.id));
@@ -233,13 +234,17 @@ export async function castVoteAction(
   deferred: boolean = false
 ): Promise<void> {
   const profile = await requireProfile();
-  const session = await (await db()).getVoteSession(sessionId);
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
+  // deferral is final for the round — once you defer you're out, no take-backs
+  const mine = (await adapter.listVotes(sessionId)).find((v) => v.profileId === profile.id);
+  if (mine?.deferred) return;
   if (deferred) {
-    await (await db()).castVote(sessionId, profile.id, null, null, true);
+    await adapter.castVote(sessionId, profile.id, null, null, true);
   } else {
     if (pickId && vetoId && pickId === vetoId) return;
-    await (await db()).castVote(sessionId, profile.id, pickId, vetoId, false);
+    await adapter.castVote(sessionId, profile.id, pickId, vetoId, false);
   }
   revalidatePath("/vote");
 }

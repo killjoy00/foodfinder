@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import {
+  CuisineRecency,
   DEFAULT_FILTERS,
   PickerFilters,
   WeightedCandidate,
@@ -10,7 +11,7 @@ import {
   sampleCandidates,
   wheelSegments,
 } from "@/lib/picker";
-import { Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
+import { DESSERT_CUISINE, Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { logVisitAction, startVoteAction } from "@/app/actions";
 import { SpinWheel } from "./SpinWheel";
@@ -24,13 +25,13 @@ const NEAR_ME_CHOICES = [1, 3, 5, 10];
 export function TonightPicker({
   restaurants,
   profiles,
-  recentVisitCuisines,
+  cuisineRecency,
   allCuisines,
   home,
 }: {
   restaurants: RestaurantFull[];
   profiles: Profile[];
-  recentVisitCuisines: string[][];
+  cuisineRecency: CuisineRecency;
   allCuisines: string[];
   home: LatLng;
 }) {
@@ -65,8 +66,8 @@ export function TonightPicker({
   }, [restaurants, nearMe, deviceOrigin, maxDistance]);
 
   const { regulars, wishlist } = useMemo(
-    () => buildCandidates(usable, filters, recentVisitCuisines),
-    [usable, filters, recentVisitCuisines]
+    () => buildCandidates(usable, filters, cuisineRecency),
+    [usable, filters, cuisineRecency]
   );
   const eligibleCount = regulars.length + wishlist.length;
 
@@ -93,9 +94,9 @@ export function TonightPicker({
       ? { ...filters, excludeIds: [...filters.excludeIds, extraExclude] }
       : filters;
     if (extraExclude) setFilters(f);
-    const picked = pickTonight(usable, f, recentVisitCuisines);
+    const picked = pickTonight(usable, f, cuisineRecency);
     if (!picked) return;
-    const pool = [...buildCandidates(usable, f, recentVisitCuisines).regulars, ...wishlist];
+    const pool = [...buildCandidates(usable, f, cuisineRecency).regulars, ...wishlist];
     setWinner(picked);
     setSegments(wheelSegments(picked, pool.length > 1 ? pool : [picked]));
     setLogged(false);
@@ -105,6 +106,20 @@ export function TonightPicker({
 
   function toggle<T>(list: T[], value: T): T[] {
     return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
+  }
+
+  // Dessert is exclusive: choosing it clears other cuisines, and choosing
+  // any other cuisine clears Dessert.
+  function toggleCuisine(c: string) {
+    const isDessert = c.trim().toLowerCase() === DESSERT_CUISINE;
+    setFilters((f) => {
+      const has = f.cuisines.includes(c);
+      let cuisines: string[];
+      if (has) cuisines = f.cuisines.filter((x) => x !== c);
+      else if (isDessert) cuisines = [c];
+      else cuisines = [...f.cuisines.filter((x) => x.trim().toLowerCase() !== DESSERT_CUISINE), c];
+      return { ...f, cuisines, excludeIds: [] };
+    });
   }
 
   function startVote(count: number) {
@@ -159,11 +174,9 @@ export function TonightPicker({
             <Chip
               key={c}
               active={filters.cuisines.includes(c)}
-              onClick={() =>
-                setFilters({ ...filters, cuisines: toggle(filters.cuisines, c), excludeIds: [] })
-              }
+              onClick={() => toggleCuisine(c)}
             >
-              {c}
+              {c.trim().toLowerCase() === DESSERT_CUISINE ? `🍰 ${c}` : c}
             </Chip>
           ))}
         </div>
@@ -248,6 +261,32 @@ export function TonightPicker({
               No wishlist places match your filters — add some (⭐ on a restaurant) for this to do anything.
             </span>
           )}
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+            Avoid repeats —{" "}
+            {filters.recencyStrength === 0
+              ? "ignore what we ate lately"
+              : filters.recencyStrength === 100
+                ? "strongly avoid recent spots & cuisines"
+                : `${filters.recencyStrength}% nudge away from recent`}
+          </span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={filters.recencyStrength}
+            onChange={(e) =>
+              setFilters({
+                ...filters,
+                recencyStrength: parseInt(e.target.value, 10),
+                excludeIds: [],
+              })
+            }
+            className="accent-orange-500"
+          />
         </label>
 
         <div className="flex flex-col gap-2">
