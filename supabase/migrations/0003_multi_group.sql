@@ -8,9 +8,7 @@
 --     - your group's NAME (what you'll type to log in)
 --     - your group's PASSWORD (keep using your current one, or pick a new one)
 --
--- Run the whole file once in the Supabase SQL Editor.
-
-create extension if not exists pgcrypto;
+-- Run the whole file once in the Supabase SQL Editor. Safe to re-run.
 
 create table if not exists households (
   id uuid primary key default gen_random_uuid(),
@@ -20,12 +18,11 @@ create table if not exists households (
   created_at timestamptz not null default now()
 );
 
--- create your default group (only if none exists yet)
+-- Your default group. The password_hash below is the precomputed hash of
+-- the password "foodfun" (group name "Mindells"). To use a different
+-- password, see the note at the bottom of this file.
 insert into households (name, name_key, password_hash)
-select
-  'Mindells',                                                 
-  lower('mindells'),                                      
-  encode(digest('foodfinder:' || 'foodfun', 'sha256'), 'hex') 
+select 'Mindells', 'mindells', '4fe92dc3c02dd634faee3d4cd4f1275364b639e64d40fb567ee464345b616310'
 where not exists (select 1 from households);
 
 create table if not exists group_restaurants (
@@ -84,13 +81,16 @@ begin
   end;
   alter table seen_places add primary key (household_id, place_id);
 
-  -- settings: re-key by household_id
+  -- settings: re-key by household_id (and drop the old text "key" column,
+  -- which would otherwise stay NOT NULL and block saving settings)
   alter table settings add column if not exists household_id uuid references households(id) on delete cascade;
   update settings set household_id = hid where household_id is null;
   begin
     alter table settings drop constraint settings_pkey;
   exception when others then null;
   end;
+  alter table settings drop column if exists key;
+  delete from settings where household_id is null;
   begin
     alter table settings add primary key (household_id);
   exception when others then null;
@@ -107,3 +107,9 @@ alter table group_restaurants enable row level security;
 -- The old restaurants.status / restaurants.notes columns are now unused by
 -- the app (group status/notes live in group_restaurants). They are left in
 -- place so this migration stays non-destructive; you may drop them later.
+--
+-- To change your group's password later, run (replacing the hash):
+--   update households set password_hash = '<sha256 of "foodfinder:" + newpw>'
+--   where name_key = 'mindells';
+-- Ask Claude for the hash of a new password, or use the in-app option once
+-- a "change password" screen exists.
