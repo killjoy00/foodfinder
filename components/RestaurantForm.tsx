@@ -11,6 +11,7 @@ type PlaceSuggestion = {
   lng: number | null;
   priceLevel: number | null;
   mapsUrl: string | null;
+  cuisines: string[];
 };
 
 /**
@@ -35,6 +36,7 @@ export function RestaurantForm({
     lng: initial?.lng ?? null,
   });
   const [price, setPrice] = useState(initial?.price ?? 2);
+  const [cuisines, setCuisines] = useState(initial?.cuisines?.join(", ") ?? "");
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [searching, setSearching] = useState(false);
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -85,6 +87,10 @@ export function RestaurantForm({
     setMapsUrl(s.mapsUrl ?? "");
     setLatLng({ lat: s.lat, lng: s.lng });
     if (s.priceLevel) setPrice(s.priceLevel);
+    // only prefill cuisines if the user hasn't typed any yet
+    if (s.cuisines.length > 0 && cuisines.trim() === "") {
+      setCuisines(s.cuisines.join(", "));
+    }
     setSuggestions([]);
   }
 
@@ -125,7 +131,8 @@ export function RestaurantForm({
         <span className="text-sm font-semibold text-muted">Cuisines (comma separated)</span>
         <input
           name="cuisines"
-          defaultValue={initial?.cuisines?.join(", ") ?? ""}
+          value={cuisines}
+          onChange={(e) => setCuisines(e.target.value)}
           placeholder="Mexican, Tacos"
           className={inputCls}
         />

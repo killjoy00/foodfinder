@@ -15,6 +15,7 @@ export const TAGS = [
   "takeout",
   "reservations",
   "date_night",
+  "healthy",
 ] as const;
 export type Tag = (typeof TAGS)[number];
 
@@ -24,6 +25,7 @@ export const TAG_LABELS: Record<Tag, string> = {
   takeout: "Good takeout",
   reservations: "Takes reservations",
   date_night: "Date night",
+  healthy: "Healthy",
 };
 
 export type Restaurant = {

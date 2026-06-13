@@ -63,9 +63,17 @@ export function TonightPicker({
   }
 
   function startVote(count: number) {
-    const candidates = sampleCandidates([...regulars, ...wishlist], count);
-    if (candidates.length >= 2) {
-      startVoteTransition(() => startVoteAction(candidates.map((c) => c.restaurant.id)));
+    // keep the restaurant we just spun as one of the options, then fill the
+    // rest of the ballot with other weighted candidates
+    const pool = [...regulars, ...wishlist];
+    const seeded = winner
+      ? [winner, ...sampleCandidates(
+          pool.filter((c) => c.restaurant.id !== winner.restaurant.id),
+          count - 1
+        )]
+      : sampleCandidates(pool, count);
+    if (seeded.length >= 2) {
+      startVoteTransition(() => startVoteAction(seeded.map((c) => c.restaurant.id)));
     }
   }
 
