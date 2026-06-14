@@ -93,16 +93,20 @@ describe("passesFilters", () => {
     expect(passesFilters(untagged, takeout)).toBe(true);
   });
 
-  it("hides dessert places unless the dessert cuisine is chosen", () => {
-    const dessert = restaurant({ cuisines: ["Dessert"] });
+  it("hides special cuisines (dessert/coffee/tea) unless that cuisine is chosen", () => {
     const normal = restaurant({ cuisines: ["Mexican"] });
-    // default: dessert hidden, normal shown
-    expect(passesFilters(dessert, DEFAULT_FILTERS)).toBe(false);
-    expect(passesFilters(normal, DEFAULT_FILTERS)).toBe(true);
-    // dessert selected: dessert shown, normal excluded by the cuisine filter
-    const wantDessert = { ...DEFAULT_FILTERS, cuisines: ["Dessert"] };
-    expect(passesFilters(dessert, wantDessert)).toBe(true);
-    expect(passesFilters(normal, wantDessert)).toBe(false);
+    for (const special of ["Dessert", "Coffee", "Tea"]) {
+      const r = restaurant({ cuisines: [special] });
+      // default: hidden, normal shown
+      expect(passesFilters(r, DEFAULT_FILTERS)).toBe(false);
+      // selected: shown, and normal excluded by the cuisine filter
+      const want = { ...DEFAULT_FILTERS, cuisines: [special] };
+      expect(passesFilters(r, want)).toBe(true);
+      expect(passesFilters(normal, want)).toBe(false);
+    }
+    // picking coffee does not surface tea
+    const tea = restaurant({ cuisines: ["Tea"] });
+    expect(passesFilters(tea, { ...DEFAULT_FILTERS, cuisines: ["Coffee"] })).toBe(false);
   });
 });
 

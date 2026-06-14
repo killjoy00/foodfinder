@@ -34,8 +34,21 @@ export const TAG_LABELS: Record<Tag, string> = {
   healthy: "Healthy",
 };
 
-/** A special cuisine: hidden from the wheel unless explicitly chosen. */
-export const DESSERT_CUISINE = "dessert";
+/**
+ * "Special" cuisines are hidden from the wheel unless explicitly chosen, and
+ * are mutually exclusive with other cuisine selections (e.g. dessert, coffee).
+ */
+export const SPECIAL_CUISINES = ["dessert", "coffee", "tea"] as const;
+
+export const SPECIAL_CUISINE_EMOJI: Record<string, string> = {
+  dessert: "🍰",
+  coffee: "☕",
+  tea: "🍵",
+};
+
+export function isSpecialCuisine(cuisine: string): boolean {
+  return (SPECIAL_CUISINES as readonly string[]).includes(cuisine.trim().toLowerCase());
+}
 
 export type Restaurant = {
   id: string;

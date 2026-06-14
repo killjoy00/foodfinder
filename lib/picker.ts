@@ -1,4 +1,4 @@
-import { DESSERT_CUISINE, RestaurantFull, daysSince } from "./types";
+import { RestaurantFull, daysSince, isSpecialCuisine } from "./types";
 
 export const DEFAULT_VOTE_SIZE = 4;
 export const VOTE_SIZE_CHOICES = [2, 3, 4, 5, 6];
@@ -56,12 +56,9 @@ export function maxRelevantScore(r: RestaurantFull, eaterIds: string[]): number 
   return scores.length > 0 ? Math.max(...scores) : null;
 }
 
-function isDessert(r: RestaurantFull): boolean {
-  return r.cuisines.some((c) => c.trim().toLowerCase() === DESSERT_CUISINE);
-}
-
-function dessertSelected(f: PickerFilters): boolean {
-  return f.cuisines.some((c) => c.trim().toLowerCase() === DESSERT_CUISINE);
+/** The special cuisines this restaurant carries (e.g. dessert, coffee). */
+function specialCuisinesOf(r: RestaurantFull): string[] {
+  return r.cuisines.map((c) => c.trim().toLowerCase()).filter(isSpecialCuisine);
 }
 
 /** Build a cuisine -> days-since-last-eaten map from recent visits. */
@@ -86,8 +83,12 @@ export function buildCuisineRecency(
 export function passesFilters(r: RestaurantFull, f: PickerFilters): boolean {
   if (f.excludeIds.includes(r.id)) return false;
   if (r.price > f.maxPrice) return false;
-  // dessert places only ever appear when the dessert cuisine is chosen
-  if (isDessert(r) && !dessertSelected(f)) return false;
+  // special places (dessert/coffee/tea) only appear when their cuisine is chosen
+  const rSpecials = specialCuisinesOf(r);
+  if (rSpecials.length > 0) {
+    const selected = new Set(f.cuisines.map((c) => c.trim().toLowerCase()));
+    if (!rSpecials.some((s) => selected.has(s))) return false;
+  }
   if (f.minScore > 0) {
     // the quality bar: someone eating tonight has to actually like it —
     // unrated places stay eligible so the wishlist isn't locked out

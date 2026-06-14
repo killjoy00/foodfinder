@@ -11,7 +11,15 @@ import {
   sampleCandidates,
   wheelSegments,
 } from "@/lib/picker";
-import { DESSERT_CUISINE, Profile, RestaurantFull, TAGS, TAG_LABELS, Tag } from "@/lib/types";
+import {
+  Profile,
+  RestaurantFull,
+  SPECIAL_CUISINE_EMOJI,
+  TAGS,
+  TAG_LABELS,
+  Tag,
+  isSpecialCuisine,
+} from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { logVisitAction, startVoteAction } from "@/app/actions";
 import { SpinWheel } from "./SpinWheel";
@@ -108,16 +116,16 @@ export function TonightPicker({
     return list.includes(value) ? list.filter((x) => x !== value) : [...list, value];
   }
 
-  // Dessert is exclusive: choosing it clears other cuisines, and choosing
-  // any other cuisine clears Dessert.
+  // Special cuisines (dessert/coffee/tea) are exclusive: choosing one clears
+  // every other cuisine, and choosing a normal cuisine clears any special.
   function toggleCuisine(c: string) {
-    const isDessert = c.trim().toLowerCase() === DESSERT_CUISINE;
+    const special = isSpecialCuisine(c);
     setFilters((f) => {
       const has = f.cuisines.includes(c);
       let cuisines: string[];
       if (has) cuisines = f.cuisines.filter((x) => x !== c);
-      else if (isDessert) cuisines = [c];
-      else cuisines = [...f.cuisines.filter((x) => x.trim().toLowerCase() !== DESSERT_CUISINE), c];
+      else if (special) cuisines = [c];
+      else cuisines = [...f.cuisines.filter((x) => !isSpecialCuisine(x)), c];
       return { ...f, cuisines, excludeIds: [] };
     });
   }
@@ -176,7 +184,9 @@ export function TonightPicker({
               active={filters.cuisines.includes(c)}
               onClick={() => toggleCuisine(c)}
             >
-              {c.trim().toLowerCase() === DESSERT_CUISINE ? `🍰 ${c}` : c}
+              {SPECIAL_CUISINE_EMOJI[c.trim().toLowerCase()]
+                ? `${SPECIAL_CUISINE_EMOJI[c.trim().toLowerCase()]} ${c}`
+                : c}
             </Chip>
           ))}
         </div>
