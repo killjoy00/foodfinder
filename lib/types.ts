@@ -36,18 +36,34 @@ export const TAG_LABELS: Record<Tag, string> = {
 
 /**
  * "Special" cuisines are hidden from the wheel unless explicitly chosen, and
- * are mutually exclusive with other cuisine selections (e.g. dessert, coffee).
+ * are mutually exclusive with other cuisine selections. Detection is
+ * token-based, so a combined label like "Coffee/Tea" still counts (but
+ * "Steak", which merely contains the letters "tea", does not).
  */
-export const SPECIAL_CUISINES = ["dessert", "coffee", "tea"] as const;
+export const SPECIAL_CUISINE_KEYWORDS = ["dessert", "coffee", "tea"] as const;
 
-export const SPECIAL_CUISINE_EMOJI: Record<string, string> = {
+const SPECIAL_KEYWORD_EMOJI: Record<string, string> = {
   dessert: "🍰",
   coffee: "☕",
   tea: "🍵",
 };
 
+function cuisineTokens(cuisine: string): string[] {
+  return cuisine.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+}
+
 export function isSpecialCuisine(cuisine: string): boolean {
-  return (SPECIAL_CUISINES as readonly string[]).includes(cuisine.trim().toLowerCase());
+  return cuisineTokens(cuisine).some((t) =>
+    (SPECIAL_CUISINE_KEYWORDS as readonly string[]).includes(t)
+  );
+}
+
+/** Emoji to badge a special cuisine chip, or null for ordinary cuisines. */
+export function specialCuisineEmoji(cuisine: string): string | null {
+  for (const t of cuisineTokens(cuisine)) {
+    if (SPECIAL_KEYWORD_EMOJI[t]) return SPECIAL_KEYWORD_EMOJI[t];
+  }
+  return null;
 }
 
 export type Restaurant = {

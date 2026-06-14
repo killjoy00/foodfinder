@@ -14,11 +14,11 @@ import {
 import {
   Profile,
   RestaurantFull,
-  SPECIAL_CUISINE_EMOJI,
   TAGS,
   TAG_LABELS,
   Tag,
   isSpecialCuisine,
+  specialCuisineEmoji,
 } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { logVisitAction, startVoteAction } from "@/app/actions";
@@ -184,9 +184,7 @@ export function TonightPicker({
               active={filters.cuisines.includes(c)}
               onClick={() => toggleCuisine(c)}
             >
-              {SPECIAL_CUISINE_EMOJI[c.trim().toLowerCase()]
-                ? `${SPECIAL_CUISINE_EMOJI[c.trim().toLowerCase()]} ${c}`
-                : c}
+              {specialCuisineEmoji(c) ? `${specialCuisineEmoji(c)} ${c}` : c}
             </Chip>
           ))}
         </div>
