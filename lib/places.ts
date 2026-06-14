@@ -146,14 +146,26 @@ async function placesPost(endpoint: string, key: string, body: unknown): Promise
 export async function textSearch(
   query: string,
   key: string,
-  bias?: { lat: number; lng: number; radiusMeters: number }
+  bias?: { lat: number; lng: number; radiusMeters: number },
+  restrict = false
 ): Promise<PlaceResult[]> {
   const body: Record<string, unknown> = {
     textQuery: query,
     includedType: "restaurant",
-    maxResultCount: 8,
+    maxResultCount: restrict ? 20 : 8,
   };
-  if (bias) {
+  if (bias && restrict) {
+    // hard-restrict to a bounding box around home (Text Search only supports
+    // a rectangle restriction; the caller still filters to the exact circle)
+    const latDelta = bias.radiusMeters / 111_320;
+    const lngDelta = bias.radiusMeters / (111_320 * Math.cos((bias.lat * Math.PI) / 180) || 1);
+    body.locationRestriction = {
+      rectangle: {
+        low: { latitude: bias.lat - latDelta, longitude: bias.lng - lngDelta },
+        high: { latitude: bias.lat + latDelta, longitude: bias.lng + lngDelta },
+      },
+    };
+  } else if (bias) {
     body.locationBias = {
       circle: {
         center: { latitude: bias.lat, longitude: bias.lng },

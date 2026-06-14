@@ -1,5 +1,6 @@
 import { RestaurantFull } from "./types";
 import { PlaceResult, textSearch } from "./places";
+import { distanceMiles } from "./distance";
 
 export type TasteProfile = {
   topCuisines: { cuisine: string; score: number }[];
@@ -60,11 +61,20 @@ export async function findRecommendations(
   const knownIds = new Set(restaurants.map((r) => r.googlePlaceId).filter(Boolean));
   const knownNames = new Set(restaurants.map((r) => r.name.toLowerCase()));
 
+  // Google's locationBias only *prefers* nearby results, so enforce the
+  // radius ourselves by measuring distance from home.
+  const radiusMiles = home.radiusMeters / 1609.34;
+  const withinRadius = (p: PlaceResult) => {
+    const d = distanceMiles({ lat: home.lat, lng: home.lng }, { lat: p.lat, lng: p.lng });
+    return d !== null && d <= radiusMiles;
+  };
+
   const results: { cuisine: string; places: PlaceResult[] }[] = [];
   for (const { cuisine } of profile.topCuisines.slice(0, 3)) {
-    const places = await textSearch(`best ${cuisine} restaurant`, key, home);
+    const places = await textSearch(`best ${cuisine} restaurant`, key, home, true);
     const fresh = places
       .filter((p) => !knownIds.has(p.placeId) && !knownNames.has(p.name.toLowerCase()))
+      .filter(withinRadius)
       .filter((p) => (p.rating ?? 0) >= 4.2)
       .filter((p) => p.priceLevel === null || p.priceLevel <= profile.preferredMaxPrice)
       .slice(0, 5);
