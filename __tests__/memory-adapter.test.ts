@@ -88,6 +88,27 @@ describe("MemoryAdapter vote deferral + credits", () => {
   });
 });
 
+describe("MemoryAdapter.clearWishlist", () => {
+  beforeEach(freshStore);
+
+  it("removes only this group's wishlist, leaving active places", async () => {
+    const db = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    await db.createRestaurant(newRestaurant({ name: "Want A", status: "wishlist" }));
+    await db.createRestaurant(newRestaurant({ name: "Want B", status: "wishlist" }));
+    const before = await db.listRestaurants();
+    const activeBefore = before.filter((r) => r.status === "active").length;
+    const wishBefore = before.filter((r) => r.status === "wishlist").length;
+    expect(wishBefore).toBeGreaterThanOrEqual(2);
+
+    const removed = await db.clearWishlist();
+    expect(removed).toBe(wishBefore);
+
+    const after = await db.listRestaurants();
+    expect(after.filter((r) => r.status === "wishlist")).toHaveLength(0);
+    expect(after.filter((r) => r.status === "active")).toHaveLength(activeBefore);
+  });
+});
+
 describe("multi-group isolation", () => {
   beforeEach(freshStore);
 

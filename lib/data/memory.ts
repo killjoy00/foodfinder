@@ -375,6 +375,23 @@ export class MemoryAdapter implements DataAdapter {
     s.ratings = s.ratings.filter((r) => !(r.restaurantId === id && memberIds.has(r.profileId)));
   }
 
+  async clearWishlist(): Promise<number> {
+    const s = store();
+    const ids = new Set(
+      s.groupRestaurants
+        .filter((g) => g.householdId === this.hid && g.status === "wishlist")
+        .map((g) => g.restaurantId)
+    );
+    if (ids.size === 0) return 0;
+    s.groupRestaurants = s.groupRestaurants.filter(
+      (g) => !(g.householdId === this.hid && g.status === "wishlist")
+    );
+    s.visits = s.visits.filter((v) => !(v.householdId === this.hid && ids.has(v.restaurantId)));
+    const memberIds = new Set(s.profiles.filter((p) => p.householdId === this.hid).map((p) => p.id));
+    s.ratings = s.ratings.filter((r) => !(ids.has(r.restaurantId) && memberIds.has(r.profileId)));
+    return ids.size;
+  }
+
   async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
     const s = store();
     if (survivorId === loserId) return;

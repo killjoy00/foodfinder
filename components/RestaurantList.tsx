@@ -3,7 +3,7 @@
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMemo, useState, useTransition } from "react";
-import { logVisitAction, setStatusAction } from "@/app/actions";
+import { clearWishlistAction, logVisitAction, setStatusAction } from "@/app/actions";
 import { PRICE_LABELS, RestaurantFull, daysSince } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { Chip } from "./ui";
@@ -37,7 +37,9 @@ export function RestaurantList({
   const [mode, setMode] = useState<"list" | "map">("list");
   const [pending, startTransition] = useTransition();
   const [loggedId, setLoggedId] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
   const hasHome = home.lat !== null && home.lng !== null;
+  const wishlistCount = restaurants.filter((r) => r.status === "wishlist").length;
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -116,6 +118,42 @@ export function RestaurantList({
           Longest ago
         </Chip>
       </div>
+
+      {view === "wishlist" && wishlistCount > 0 && (
+        confirmClear ? (
+          <div className="flex items-center gap-2 rounded-xl border border-red-900 bg-red-950/30 p-2">
+            <span className="flex-1 text-sm text-red-200">
+              Delete all {wishlistCount} wishlist place{wishlistCount === 1 ? "" : "s"}? (Your
+              “Been there” list is untouched.)
+            </span>
+            <button
+              disabled={pending}
+              onClick={() =>
+                startTransition(async () => {
+                  await clearWishlistAction();
+                  setConfirmClear(false);
+                })
+              }
+              className="rounded-lg bg-red-900 px-3 py-2 text-sm font-bold text-red-100 disabled:opacity-50"
+            >
+              {pending ? "Deleting…" : "Yes, delete all"}
+            </button>
+            <button
+              onClick={() => setConfirmClear(false)}
+              className="rounded-lg border border-border-soft px-3 py-2 text-sm text-muted"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmClear(true)}
+            className="self-start rounded-xl border border-red-900 px-3 py-2 text-sm font-semibold text-red-400"
+          >
+            🗑️ Clear wishlist ({wishlistCount})
+          </button>
+        )
+      )}
 
       <ul className="flex flex-col gap-2">
         {shown.map((r) => {

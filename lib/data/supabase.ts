@@ -375,6 +375,37 @@ export class SupabaseAdapter implements DataAdapter {
     }
   }
 
+  async clearWishlist(): Promise<number> {
+    const links = await unwrap(
+      this.client
+        .from("group_restaurants")
+        .select("restaurant_id")
+        .eq("household_id", this.hid)
+        .eq("status", "wishlist")
+    );
+    const ids = (links ?? []).map((r: Row) => r.restaurant_id);
+    if (ids.length === 0) return 0;
+    await unwrap(
+      this.client
+        .from("group_restaurants")
+        .delete()
+        .eq("household_id", this.hid)
+        .eq("status", "wishlist")
+    );
+    const members = await this.memberIds();
+    for (const part of chunk(ids, IN_CHUNK)) {
+      await unwrap(
+        this.client.from("visits").delete().eq("household_id", this.hid).in("restaurant_id", part)
+      );
+      if (members.length) {
+        await unwrap(
+          this.client.from("ratings").delete().in("restaurant_id", part).in("profile_id", members)
+        );
+      }
+    }
+    return ids.length;
+  }
+
   async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
     if (survivorId === loserId) return;
     const [survivor, loser] = await Promise.all([

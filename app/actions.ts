@@ -150,6 +150,14 @@ export async function deleteRestaurantAction(id: string): Promise<void> {
   redirect("/restaurants");
 }
 
+export async function clearWishlistAction(): Promise<number> {
+  await requireProfile();
+  const removed = await (await db()).clearWishlist();
+  revalidatePath("/restaurants");
+  revalidatePath("/");
+  return removed;
+}
+
 export async function mergeRestaurantsAction(survivorId: string, loserId: string): Promise<void> {
   await requireProfile();
   await (await db()).mergeRestaurants(survivorId, loserId);

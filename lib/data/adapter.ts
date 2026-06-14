@@ -38,6 +38,8 @@ export interface DataAdapter {
   createRestaurant(data: NewRestaurant): Promise<Restaurant>;
   updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void>;
   deleteRestaurant(id: string): Promise<void>;
+  /** Stop tracking every wishlist restaurant for this group; returns how many. */
+  clearWishlist(): Promise<number>;
   /** Fold `loserId` into `survivorId` (visits, ratings, tags, cuisines), then delete the loser. */
   mergeRestaurants(survivorId: string, loserId: string): Promise<void>;
 
