@@ -3,6 +3,7 @@ import {
   DEFAULT_FILTERS,
   buildCandidates,
   buildCuisineRecency,
+  collapseChains,
   eaterScore,
   passesFilters,
   pickTonight,
@@ -243,6 +244,27 @@ describe("sampleCandidates", () => {
     expect(tiny).toHaveLength(2);
     const zeroed = pool.map((c) => ({ ...c, weight: 0 }));
     expect(sampleCandidates(zeroed, 3)).toHaveLength(0);
+  });
+});
+
+describe("collapseChains", () => {
+  it("collapses same-name locations into one, keeping the nearest", () => {
+    const here = { lat: 30.27, lng: -97.74 };
+    const locs = [
+      restaurant({ id: "c1", name: "Chick-fil-A", lat: 30.5, lng: -97.9, ratings: { a: 8 } }),
+      restaurant({ id: "c2", name: "Chick-fil-A", lat: 30.28, lng: -97.75, ratings: { b: 6 } }),
+      restaurant({ id: "solo", name: "Local Diner", lat: 30.27, lng: -97.74 }),
+    ];
+    const out = collapseChains(locs, here);
+    expect(out).toHaveLength(2); // chain + solo
+    const chain = out.find((r) => r.name === "Chick-fil-A")!;
+    expect(chain.id).toBe("c2"); // nearer location is the representative
+    expect(chain.ratings).toEqual({ a: 8, b: 6 }); // ratings pooled across locations
+  });
+
+  it("passes single-location restaurants through unchanged", () => {
+    const one = [restaurant({ id: "x", name: "Solo Spot" })];
+    expect(collapseChains(one)).toHaveLength(1);
   });
 });
 

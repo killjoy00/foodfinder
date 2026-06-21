@@ -1,4 +1,5 @@
 import { RestaurantFull, daysSince, isSpecialCuisine } from "./types";
+import { LatLng, distanceMiles } from "./distance";
 
 export const DEFAULT_VOTE_SIZE = 4;
 export const VOTE_SIZE_CHOICES = [2, 3, 4, 5, 6];
@@ -158,6 +159,75 @@ export function weighCandidate(
   }
 
   return { restaurant: r, weight: ratingWeight * placeMult * cuisineMult, reasons };
+}
+
+/** Normalized key for grouping chain locations (e.g. every "Chick-fil-A"). */
+function chainKey(name: string): string {
+  return name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * Collapse multi-location chains into one candidate so the wheel shows a
+ * chain once. The representative is the nearest location (when we know where
+ * "here" is), ratings are averaged across locations, and recency/visits are
+ * pooled. Single-location restaurants pass through untouched.
+ */
+export function collapseChains(
+  restaurants: RestaurantFull[],
+  origin?: LatLng | null
+): RestaurantFull[] {
+  const groups = new Map<string, RestaurantFull[]>();
+  for (const r of restaurants) {
+    const arr = groups.get(chainKey(r.name));
+    if (arr) arr.push(r);
+    else groups.set(chainKey(r.name), [r]);
+  }
+
+  const out: RestaurantFull[] = [];
+  for (const locs of groups.values()) {
+    if (locs.length === 1) {
+      out.push(locs[0]);
+      continue;
+    }
+    let rep = locs[0];
+    if (origin && origin.lat !== null && origin.lng !== null) {
+      let best = Infinity;
+      for (const l of locs) {
+        const d = distanceMiles(origin, l);
+        if (d !== null && d < best) {
+          best = d;
+          rep = l;
+        }
+      }
+    } else {
+      rep = locs.reduce((a, b) => ((b.lastVisitAt ?? "") > (a.lastVisitAt ?? "") ? b : a), locs[0]);
+    }
+
+    const sums = new Map<string, { sum: number; n: number }>();
+    for (const l of locs) {
+      for (const [pid, score] of Object.entries(l.ratings)) {
+        const e = sums.get(pid) ?? { sum: 0, n: 0 };
+        e.sum += score;
+        e.n += 1;
+        sums.set(pid, e);
+      }
+    }
+    const ratings: Record<string, number> = {};
+    for (const [pid, { sum, n }] of sums) ratings[pid] = Math.round(sum / n);
+
+    const lastVisitAt =
+      locs.map((l) => l.lastVisitAt).filter((d): d is string => !!d).sort().pop() ?? null;
+
+    out.push({
+      ...rep,
+      ratings,
+      lastVisitAt,
+      visitCount: locs.reduce((a, l) => a + l.visitCount, 0),
+      status: locs.some((l) => l.status === "active") ? "active" : "wishlist",
+      cuisines: [...new Set(locs.flatMap((l) => l.cuisines))],
+    });
+  }
+  return out;
 }
 
 export function buildCandidates(

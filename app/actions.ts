@@ -17,6 +17,7 @@ import {
   DEFAULT_VOTE_SIZE,
   buildCandidates,
   buildCuisineRecency,
+  collapseChains,
   sampleCandidates,
 } from "@/lib/picker";
 import { geocodeAddress, zipToCoords } from "@/lib/geocode";
@@ -169,7 +170,15 @@ export async function trackRestaurantAction(
   status: RestaurantStatus
 ): Promise<void> {
   await requireProfile();
-  await (await db()).trackRestaurant(restaurantId, status);
+  const adapter = await db();
+  await adapter.trackRestaurant(restaurantId, status);
+  // catalog seeds (e.g. the Austin list) carry no coordinates; geocode on add
+  // so the family's distance filtering works for places they actually track
+  const r = await adapter.getRestaurant(restaurantId);
+  if (r && (r.lat === null || r.lng === null) && r.address) {
+    const point = await geocodeAddress(r.address);
+    if (point) await adapter.updateRestaurant(restaurantId, { lat: point.lat, lng: point.lng });
+  }
   revalidatePath("/restaurants");
   revalidatePath("/restaurants/browse");
   revalidatePath("/");
@@ -253,7 +262,11 @@ export async function startQuickVoteAction(count: number): Promise<void> {
   ]);
   const cuisinesByRestaurant = new Map(restaurants.map((r) => [r.id, r.cuisines]));
   const cuisineRecency = buildCuisineRecency(recentVisits, cuisinesByRestaurant);
-  const { regulars, wishlist } = buildCandidates(restaurants, DEFAULT_FILTERS, cuisineRecency);
+  const { regulars, wishlist } = buildCandidates(
+    collapseChains(restaurants),
+    DEFAULT_FILTERS,
+    cuisineRecency
+  );
   const candidates = sampleCandidates([...regulars, ...wishlist], size);
   if (candidates.length < 2) return;
   await (await db()).createVoteSession(candidates.map((c) => c.restaurant.id));

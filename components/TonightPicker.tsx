@@ -7,6 +7,7 @@ import {
   PickerFilters,
   WeightedCandidate,
   buildCandidates,
+  collapseChains,
   pickTonight,
   sampleCandidates,
   wheelSegments,
@@ -73,9 +74,13 @@ export function TonightPicker({
     });
   }, [restaurants, nearMe, deviceOrigin, maxDistance]);
 
+  // chains (same name, multiple locations) collapse to one entry; the
+  // representative is the nearest location to wherever "here" is
+  const collapsed = useMemo(() => collapseChains(usable, origin), [usable, origin]);
+
   const { regulars, wishlist } = useMemo(
-    () => buildCandidates(usable, filters, cuisineRecency),
-    [usable, filters, cuisineRecency]
+    () => buildCandidates(collapsed, filters, cuisineRecency),
+    [collapsed, filters, cuisineRecency]
   );
   const eligibleCount = regulars.length + wishlist.length;
 
@@ -102,9 +107,10 @@ export function TonightPicker({
       ? { ...filters, excludeIds: [...filters.excludeIds, extraExclude] }
       : filters;
     if (extraExclude) setFilters(f);
-    const picked = pickTonight(usable, f, cuisineRecency);
+    const candidates = collapseChains(usable, origin);
+    const picked = pickTonight(candidates, f, cuisineRecency);
     if (!picked) return;
-    const pool = [...buildCandidates(usable, f, cuisineRecency).regulars, ...wishlist];
+    const pool = [...buildCandidates(candidates, f, cuisineRecency).regulars, ...wishlist];
     setWinner(picked);
     setSegments(wheelSegments(picked, pool.length > 1 ? pool : [picked]));
     setLogged(false);
