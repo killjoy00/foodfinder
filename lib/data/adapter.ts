@@ -17,6 +17,20 @@ export type DiscoveryInput = Omit<Discovery, "foundAt" | "dismissed">;
 
 export type HouseholdAuth = { id: string; name: string; passwordHash: string };
 
+/** A catalog (master-list) entry, with whether the current group tracks it. */
+export type CatalogEntry = {
+  id: string;
+  name: string;
+  cuisines: string[];
+  price: number;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  mapsUrl: string | null;
+  tracked: boolean;
+  trackedStatus: "active" | "wishlist" | null;
+};
+
 /** Tenant registry — NOT scoped to a single household. Used by auth only. */
 export interface HouseholdRegistry {
   createHousehold(name: string, passwordHash: string): Promise<Household>;
@@ -40,6 +54,10 @@ export interface DataAdapter {
   deleteRestaurant(id: string): Promise<void>;
   /** Stop tracking every wishlist restaurant for this group; returns how many. */
   clearWishlist(): Promise<number>;
+  /** The shared master catalog, flagged with whether this group tracks each. */
+  listCatalog(): Promise<CatalogEntry[]>;
+  /** Add a catalog restaurant to this group's list (active = been there). */
+  trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void>;
   /** Fold `loserId` into `survivorId` (visits, ratings, tags, cuisines), then delete the loser. */
   mergeRestaurants(survivorId: string, loserId: string): Promise<void>;
 

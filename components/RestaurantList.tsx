@@ -80,7 +80,10 @@ export function RestaurantList({
         </div>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Link href="/restaurants/browse" className="text-sm text-accent underline">
+          🔎 Browse master list
+        </Link>
         <Link href="/restaurants/duplicates" className="text-sm text-accent underline">
           🔁 Find duplicates
         </Link>

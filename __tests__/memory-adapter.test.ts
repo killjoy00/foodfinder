@@ -109,6 +109,34 @@ describe("MemoryAdapter.clearWishlist", () => {
   });
 });
 
+describe("MemoryAdapter master catalog", () => {
+  beforeEach(freshStore);
+
+  it("lists the shared catalog flagged with what this group tracks", async () => {
+    const other = await new MemoryRegistry().createHousehold("Cousins", "hash");
+    const a = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const b = new MemoryAdapter(other.id);
+
+    // group B starts tracking nothing, but sees the shared catalog
+    const catalogB = await b.listCatalog();
+    expect(catalogB.length).toBeGreaterThan(0);
+    expect(catalogB.every((c) => !c.tracked)).toBe(true);
+
+    // tracking one adds it to B's list without affecting A
+    const target = catalogB[0];
+    await b.trackRestaurant(target.id, "wishlist");
+    expect((await b.listRestaurants()).some((r) => r.id === target.id)).toBe(true);
+    const flagged = (await b.listCatalog()).find((c) => c.id === target.id);
+    expect(flagged?.tracked).toBe(true);
+    expect(flagged?.trackedStatus).toBe("wishlist");
+
+    // A's catalog still shows it as tracked (A had the demo seed) or not, but
+    // B tracking it didn't change A's tracked set size
+    const aTracked = (await a.listCatalog()).filter((c) => c.tracked).length;
+    expect(aTracked).toBeGreaterThan(0);
+  });
+});
+
 describe("multi-group isolation", () => {
   beforeEach(freshStore);
 

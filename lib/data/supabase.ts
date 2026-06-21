@@ -375,6 +375,48 @@ export class SupabaseAdapter implements DataAdapter {
     }
   }
 
+  async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
+    const [catalog, links] = await Promise.all([
+      unwrap(
+        this.client
+          .from("restaurants")
+          .select("id, name, cuisines, price, address, lat, lng, maps_url")
+          .order("name", { ascending: true })
+          .limit(5000)
+      ),
+      unwrap(
+        this.client
+          .from("group_restaurants")
+          .select("restaurant_id, status")
+          .eq("household_id", this.hid)
+      ),
+    ]);
+    const linkByR = new Map((links ?? []).map((l: Row) => [l.restaurant_id, l.status]));
+    return (catalog ?? []).map((c: Row) => ({
+      id: c.id,
+      name: c.name,
+      cuisines: c.cuisines ?? [],
+      price: c.price ?? 2,
+      address: c.address,
+      lat: c.lat,
+      lng: c.lng,
+      mapsUrl: c.maps_url,
+      tracked: linkByR.has(c.id),
+      trackedStatus: linkByR.get(c.id) ?? null,
+    }));
+  }
+
+  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
+    await unwrap(
+      this.client
+        .from("group_restaurants")
+        .upsert(
+          { household_id: this.hid, restaurant_id: restaurantId, status },
+          { onConflict: "household_id,restaurant_id" }
+        )
+    );
+  }
+
   async clearWishlist(): Promise<number> {
     const links = await unwrap(
       this.client

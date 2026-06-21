@@ -375,6 +375,41 @@ export class MemoryAdapter implements DataAdapter {
     s.ratings = s.ratings.filter((r) => !(r.restaurantId === id && memberIds.has(r.profileId)));
   }
 
+  async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
+    const s = store();
+    const linkByR = new Map(
+      s.groupRestaurants.filter((g) => g.householdId === this.hid).map((g) => [g.restaurantId, g.status])
+    );
+    return s.restaurants.map((c) => ({
+      id: c.id,
+      name: c.name,
+      cuisines: c.cuisines,
+      price: c.price,
+      address: c.address,
+      lat: c.lat,
+      lng: c.lng,
+      mapsUrl: c.mapsUrl,
+      tracked: linkByR.has(c.id),
+      trackedStatus: linkByR.get(c.id) ?? null,
+    }));
+  }
+
+  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
+    const s = store();
+    const existing = s.groupRestaurants.find(
+      (g) => g.householdId === this.hid && g.restaurantId === restaurantId
+    );
+    if (existing) existing.status = status;
+    else
+      s.groupRestaurants.push({
+        householdId: this.hid,
+        restaurantId,
+        status,
+        notes: null,
+        createdAt: new Date().toISOString(),
+      });
+  }
+
   async clearWishlist(): Promise<number> {
     const s = store();
     const ids = new Set(

@@ -164,6 +164,17 @@ export async function deleteRestaurantAction(id: string): Promise<void> {
   redirect("/restaurants");
 }
 
+export async function trackRestaurantAction(
+  restaurantId: string,
+  status: RestaurantStatus
+): Promise<void> {
+  await requireProfile();
+  await (await db()).trackRestaurant(restaurantId, status);
+  revalidatePath("/restaurants");
+  revalidatePath("/restaurants/browse");
+  revalidatePath("/");
+}
+
 export async function clearWishlistAction(): Promise<number> {
   await requireProfile();
   const removed = await (await db()).clearWishlist();
