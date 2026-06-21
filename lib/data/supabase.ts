@@ -406,6 +406,58 @@ export class SupabaseAdapter implements DataAdapter {
     }));
   }
 
+  async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
+    if (entries.length === 0) return 0;
+    const toRow = (e: import("./adapter").CatalogInput) => ({
+      name: e.name,
+      cuisines: e.cuisines,
+      price: e.price,
+      address: e.address,
+      lat: e.lat,
+      lng: e.lng,
+      google_place_id: e.googlePlaceId,
+      maps_url: e.mapsUrl,
+    });
+    let added = 0;
+
+    // entries with a Google place id: upsert ignoring existing
+    const withPid = entries.filter((e) => e.googlePlaceId);
+    for (const part of chunk(withPid, 500)) {
+      const inserted = await unwrap(
+        this.client
+          .from("restaurants")
+          .upsert(part.map(toRow), { onConflict: "google_place_id", ignoreDuplicates: true })
+          .select("id")
+      );
+      added += (inserted ?? []).length;
+    }
+
+    // entries without a place id: dedupe by name against the catalog + batch
+    const withoutPid = entries.filter((e) => !e.googlePlaceId);
+    if (withoutPid.length) {
+      const existing = new Set<string>();
+      const names = [...new Set(withoutPid.map((e) => e.name))];
+      for (const part of chunk(names, 200)) {
+        const rows = await unwrap(this.client.from("restaurants").select("name").in("name", part));
+        for (const r of (rows ?? []) as Row[]) existing.add(r.name.toLowerCase());
+      }
+      const seen = new Set<string>();
+      const fresh = withoutPid.filter((e) => {
+        const k = e.name.trim().toLowerCase();
+        if (existing.has(k) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      for (const part of chunk(fresh, 500)) {
+        const inserted = await unwrap(
+          this.client.from("restaurants").insert(part.map(toRow)).select("id")
+        );
+        added += (inserted ?? []).length;
+      }
+    }
+    return added;
+  }
+
   async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
     await unwrap(
       this.client

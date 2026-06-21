@@ -11,7 +11,7 @@ import {
   setActiveProfile,
 } from "@/lib/auth";
 import { db } from "@/lib/data";
-import { NewRestaurant } from "@/lib/data/adapter";
+import { CatalogInput, NewRestaurant } from "@/lib/data/adapter";
 import {
   DEFAULT_FILTERS,
   DEFAULT_VOTE_SIZE,
@@ -163,6 +163,13 @@ export async function deleteRestaurantAction(id: string): Promise<void> {
   await (await db()).deleteRestaurant(id);
   revalidatePath("/restaurants");
   redirect("/restaurants");
+}
+
+export async function importCatalogAction(entries: CatalogInput[]): Promise<number> {
+  await requireProfile();
+  const added = await (await db()).addCatalogEntries(entries.slice(0, 6000));
+  revalidatePath("/restaurants/browse");
+  return added;
 }
 
 export async function trackRestaurantAction(

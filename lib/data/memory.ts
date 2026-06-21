@@ -394,6 +394,35 @@ export class MemoryAdapter implements DataAdapter {
     }));
   }
 
+  async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
+    const s = store();
+    let added = 0;
+    for (const e of entries) {
+      const dupe = s.restaurants.find(
+        (c) =>
+          (e.googlePlaceId && c.googlePlaceId === e.googlePlaceId) ||
+          c.name.trim().toLowerCase() === e.name.trim().toLowerCase()
+      );
+      if (dupe) continue;
+      s.restaurants.push({
+        id: randomUUID(),
+        name: e.name,
+        cuisines: e.cuisines,
+        price: e.price,
+        address: e.address,
+        lat: e.lat,
+        lng: e.lng,
+        googlePlaceId: e.googlePlaceId,
+        mapsUrl: e.mapsUrl,
+        reserveUrl: null,
+        tags: [],
+        createdAt: new Date().toISOString(),
+      });
+      added++;
+    }
+    return added;
+  }
+
   async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
     const s = store();
     const existing = s.groupRestaurants.find(

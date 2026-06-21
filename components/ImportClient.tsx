@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { importTakeoutAction } from "@/app/actions";
+import { importCatalogAction, importTakeoutAction } from "@/app/actions";
 import { TakeoutItem, parseTakeoutAny } from "@/lib/takeout";
+import { CatalogRow, parseCatalogCsv } from "@/lib/catalog";
 
 export function ImportClient() {
   const [items, setItems] = useState<TakeoutItem[] | null>(null);
@@ -160,6 +161,72 @@ export function ImportClient() {
           </a>
         </div>
       </section>
+
+      <MasterListImport />
     </div>
+  );
+}
+
+function MasterListImport() {
+  const [rows, setRows] = useState<CatalogRow[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState<number | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  async function onFile(file: File) {
+    setError(null);
+    setAdded(null);
+    try {
+      const parsed = parseCatalogCsv(await file.text());
+      if (parsed.length === 0) {
+        setError("No rows found in that CSV.");
+        return;
+      }
+      setRows(parsed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't read that file.");
+    }
+  }
+
+  function run() {
+    if (!rows) return;
+    startTransition(async () => {
+      const n = await importCatalogAction(rows);
+      setAdded(n);
+      setRows(null);
+    });
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-border-soft bg-surface p-4">
+      <h2 className="font-bold">Load a master list (CSV)</h2>
+      <p className="text-sm text-muted">
+        Bulk-add restaurants to the <strong>shared catalog</strong> (not your list) — e.g. a
+        city-wide list. Families then browse and add the ones they care about. Recognizes columns
+        like Name, Cuisine, Price, Neighborhood/Address, and a Google Maps link or place id.
+      </p>
+      <input
+        type="file"
+        accept=".csv,text/csv"
+        onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+        className="rounded-xl border border-border-soft bg-surface-2 p-3 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-accent file:px-3 file:py-1.5 file:font-semibold file:text-black"
+      />
+      {error && <p className="text-sm text-red-400">{error}</p>}
+      {rows && (
+        <button
+          onClick={run}
+          disabled={pending}
+          className="rounded-xl bg-accent px-4 py-3 font-bold text-black disabled:opacity-50"
+        >
+          {pending ? "Adding…" : `Add ${rows.length} to the catalog`}
+        </button>
+      )}
+      {added !== null && (
+        <p className="rounded-xl bg-green-950/60 px-4 py-3 text-sm font-semibold text-green-300">
+          Added {added} new restaurant{added === 1 ? "" : "s"} to the catalog. Browse them under
+          Places → 🔎 Browse master list. 🎉
+        </p>
+      )}
+    </section>
   );
 }

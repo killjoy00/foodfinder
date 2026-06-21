@@ -17,6 +17,18 @@ export type DiscoveryInput = Omit<Discovery, "foundAt" | "dismissed">;
 
 export type HouseholdAuth = { id: string; name: string; passwordHash: string };
 
+/** A row to add to the shared master catalog (not tracked by any group). */
+export type CatalogInput = {
+  name: string;
+  cuisines: string[];
+  price: number;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+  mapsUrl: string | null;
+};
+
 /** A catalog (master-list) entry, with whether the current group tracks it. */
 export type CatalogEntry = {
   id: string;
@@ -58,6 +70,8 @@ export interface DataAdapter {
   listCatalog(): Promise<CatalogEntry[]>;
   /** Add a catalog restaurant to this group's list (active = been there). */
   trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void>;
+  /** Bulk-add rows to the shared catalog, skipping dupes; returns count added. */
+  addCatalogEntries(entries: CatalogInput[]): Promise<number>;
   /** Fold `loserId` into `survivorId` (visits, ratings, tags, cuisines), then delete the loser. */
   mergeRestaurants(survivorId: string, loserId: string): Promise<void>;
 
