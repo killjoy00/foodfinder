@@ -31,3 +31,32 @@ export async function zipToCoords(zip: string, country = "us"): Promise<ZipResul
     return null;
   }
 }
+
+export type GeoPoint = { lat: number; lng: number };
+
+/**
+ * Geocode a free-form street address via OpenStreetMap Nominatim (free, no
+ * key). Best-effort — returns null on any failure so callers don't break.
+ */
+export async function geocodeAddress(address: string): Promise<GeoPoint | null> {
+  const q = address.trim();
+  if (q.length < 4) return null;
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`,
+      {
+        headers: { "User-Agent": "FoodFinder/1.0 (family restaurant picker)" },
+        signal: AbortSignal.timeout(6000),
+      }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const hit = Array.isArray(data) ? data[0] : null;
+    if (!hit) return null;
+    const lat = parseFloat(hit.lat);
+    const lng = parseFloat(hit.lon);
+    return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  } catch {
+    return null;
+  }
+}

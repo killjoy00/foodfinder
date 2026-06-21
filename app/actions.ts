@@ -19,7 +19,8 @@ import {
   buildCuisineRecency,
   sampleCandidates,
 } from "@/lib/picker";
-import { zipToCoords } from "@/lib/geocode";
+import { geocodeAddress, zipToCoords } from "@/lib/geocode";
+import { distanceMiles } from "@/lib/distance";
 import { findRecommendations } from "@/lib/recommend";
 import { placesKey } from "@/lib/places";
 import { runDiscoverySweep, SweepResult } from "@/lib/sweep";
@@ -125,9 +126,20 @@ function restaurantFromForm(formData: FormData): NewRestaurant {
   };
 }
 
+/** Fill in coordinates from the address when they're missing or the address changed. */
+async function ensureCoords(data: NewRestaurant, prevAddress?: string | null): Promise<NewRestaurant> {
+  const hasCoords = data.lat !== null && data.lng !== null;
+  const addressChanged = prevAddress !== undefined && data.address !== (prevAddress ?? null);
+  if (data.address && (!hasCoords || addressChanged)) {
+    const point = await geocodeAddress(data.address);
+    if (point) return { ...data, lat: point.lat, lng: point.lng };
+  }
+  return data;
+}
+
 export async function addRestaurantAction(formData: FormData): Promise<void> {
   await requireProfile();
-  const data = restaurantFromForm(formData);
+  const data = await ensureCoords(restaurantFromForm(formData));
   if (!data.name) return;
   const created = await (await db()).createRestaurant(data);
   revalidatePath("/restaurants");
@@ -136,9 +148,11 @@ export async function addRestaurantAction(formData: FormData): Promise<void> {
 
 export async function updateRestaurantAction(id: string, formData: FormData): Promise<void> {
   await requireProfile();
-  const data = restaurantFromForm(formData);
+  const adapter = await db();
+  const existing = await adapter.getRestaurant(id);
+  const data = await ensureCoords(restaurantFromForm(formData), existing?.address ?? null);
   if (!data.name) return;
-  await (await db()).updateRestaurant(id, data);
+  await adapter.updateRestaurant(id, data);
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
 }
@@ -300,13 +314,14 @@ export async function addDiscoveryToWishlistAction(placeId: string): Promise<voi
   const discoveries = await (await db()).listDiscoveries();
   const d = discoveries.find((x) => x.placeId === placeId);
   if (!d) return;
+  const point = d.address ? await geocodeAddress(d.address) : null;
   await (await db()).createRestaurant({
     name: d.name,
     cuisines: [],
     price: 2,
     address: d.address,
-    lat: null,
-    lng: null,
+    lat: point?.lat ?? null,
+    lng: point?.lng ?? null,
     googlePlaceId: d.placeId,
     mapsUrl: d.mapsUrl,
     reserveUrl: null,
@@ -334,6 +349,9 @@ export type RecommendationGroup = {
     address: string | null;
     rating: number | null;
     mapsUrl: string | null;
+    lat: number | null;
+    lng: number | null;
+    distanceMiles: number | null;
   }[];
 };
 
@@ -353,12 +371,22 @@ export async function fetchRecommendationsAction(radiusMiles?: number): Promise<
       ? Math.round(Math.min(radiusMiles, 50) * 1609.34)
       : settings.radiusMeters;
   const restaurants = await (await db()).listRestaurants();
+  const home = { lat: settings.homeLat, lng: settings.homeLng };
   try {
-    const groups = await findRecommendations(
-      restaurants,
-      { lat: settings.homeLat, lng: settings.homeLng, radiusMeters },
-      key
-    );
+    const raw = await findRecommendations(restaurants, { ...home, radiusMeters }, key);
+    const groups: RecommendationGroup[] = raw.map((g) => ({
+      cuisine: g.cuisine,
+      places: g.places.map((p) => ({
+        placeId: p.placeId,
+        name: p.name,
+        address: p.address,
+        rating: p.rating,
+        mapsUrl: p.mapsUrl,
+        lat: p.lat,
+        lng: p.lng,
+        distanceMiles: distanceMiles(home, { lat: p.lat, lng: p.lng }),
+      })),
+    }));
     return { ok: true, groups };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "Recommendation lookup failed" };
@@ -371,6 +399,8 @@ export async function addRecommendationToWishlistAction(place: {
   address: string | null;
   mapsUrl: string | null;
   cuisine: string;
+  lat: number | null;
+  lng: number | null;
 }): Promise<void> {
   await requireProfile();
   await (await db()).createRestaurant({
@@ -378,8 +408,8 @@ export async function addRecommendationToWishlistAction(place: {
     cuisines: place.cuisine ? [place.cuisine] : [],
     price: 2,
     address: place.address,
-    lat: null,
-    lng: null,
+    lat: place.lat,
+    lng: place.lng,
     googlePlaceId: place.placeId,
     mapsUrl: place.mapsUrl,
     reserveUrl: null,

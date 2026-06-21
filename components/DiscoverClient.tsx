@@ -11,6 +11,7 @@ import {
   runSweepAction,
 } from "@/app/actions";
 import { Discovery } from "@/lib/types";
+import { formatMiles } from "@/lib/distance";
 import { Segmented } from "./ui";
 
 const RADIUS_CHOICES = [2, 5, 10, 25];
@@ -140,7 +141,8 @@ export function DiscoverClient({
       <section className="flex flex-col gap-3">
         <h2 className="font-bold">Picked for your family</h2>
         <p className="text-sm text-muted">
-          Based on the cuisines and price range your ratings show you love.
+          Google-rated spots near your saved home location, in the cuisines and price range your
+          ratings show you love. Distances are measured from home.
         </p>
         {ready && (
           <div className="flex flex-col gap-1">
@@ -188,6 +190,7 @@ export function DiscoverClient({
                     <p className="truncate font-bold">{p.name}</p>
                     <p className="truncate text-sm text-muted">
                       {p.rating ? `★ ${p.rating.toFixed(1)} · ` : ""}
+                      {p.distanceMiles !== null ? `${formatMiles(p.distanceMiles)} · ` : ""}
                       {p.address ?? ""}
                     </p>
                   </div>
@@ -216,6 +219,8 @@ export function DiscoverClient({
                             address: p.address,
                             mapsUrl: p.mapsUrl,
                             cuisine: group.cuisine,
+                            lat: p.lat,
+                            lng: p.lng,
                           });
                           setAddedRecs((prev) => new Set(prev).add(p.placeId));
                         })
