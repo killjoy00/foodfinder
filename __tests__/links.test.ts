@@ -29,15 +29,23 @@ describe("openTableLink", () => {
 });
 
 describe("mapsLink", () => {
-  it("uses the stored maps url when present", () => {
-    expect(
-      mapsLink({ name: "X", address: null, mapsUrl: "https://maps.app/x", googlePlaceId: null })
-    ).toBe("https://maps.app/x");
-  });
+  const base = { name: "X", address: null, mapsUrl: null, googlePlaceId: null, lat: null, lng: null };
 
-  it("builds a place-id query when available", () => {
-    const url = mapsLink({ name: "Taco Spot", address: "1 A St", mapsUrl: null, googlePlaceId: "PID" });
+  it("prefers the place id (most reliable) over a stored url", () => {
+    const url = mapsLink({
+      ...base,
+      name: "Taco Spot",
+      address: "1 A St",
+      mapsUrl: "https://maps.app/x",
+      googlePlaceId: "PID",
+    });
     expect(url).toContain("query_place_id=PID");
     expect(url).toContain("Taco");
+  });
+
+  it("falls back to coordinates, then stored url, then a text search", () => {
+    expect(mapsLink({ ...base, lat: 30.27, lng: -97.74 })).toContain("query=30.27%2C-97.74");
+    expect(mapsLink({ ...base, mapsUrl: "https://maps.app/x" })).toBe("https://maps.app/x");
+    expect(mapsLink({ ...base, name: "Y", address: "Z" })).toContain("query=Y%20Z");
   });
 });

@@ -568,6 +568,16 @@ export class SupabaseAdapter implements DataAdapter {
     );
   }
 
+  async clearRating(restaurantId: string, profileId: string): Promise<void> {
+    await unwrap(
+      this.client
+        .from("ratings")
+        .delete()
+        .eq("restaurant_id", restaurantId)
+        .eq("profile_id", profileId)
+    );
+  }
+
   async addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
     await unwrap(
       this.client

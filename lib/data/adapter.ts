@@ -77,6 +77,7 @@ export interface DataAdapter {
 
   // ratings
   setRating(restaurantId: string, profileId: string, score: number): Promise<void>;
+  clearRating(restaurantId: string, profileId: string): Promise<void>;
 
   // visits
   addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void>;

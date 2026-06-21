@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setRatingAction } from "@/app/actions";
+import { clearRatingAction, setRatingAction } from "@/app/actions";
 import { Profile } from "@/lib/types";
 
 export function RatingRows({
@@ -13,34 +13,43 @@ export function RatingRows({
   profiles: Profile[];
   ratings: Record<string, number>;
 }) {
-  const [local, setLocal] = useState<Record<string, number>>(ratings);
+  const [local, setLocal] = useState<Record<string, number | undefined>>(ratings);
   const [, startTransition] = useTransition();
 
-  function setScore(profileId: string, score: number) {
-    setLocal((prev) => ({ ...prev, [profileId]: score }));
-    startTransition(() => setRatingAction(restaurantId, profileId, score));
+  // tap a number to set it; tap the same number again to clear the rating
+  function toggleScore(profileId: string, score: number) {
+    setLocal((prev) => {
+      const current = prev[profileId];
+      const next = current === score ? undefined : score;
+      startTransition(() =>
+        next === undefined
+          ? clearRatingAction(restaurantId, profileId)
+          : setRatingAction(restaurantId, profileId, next)
+      );
+      return { ...prev, [profileId]: next };
+    });
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {profiles.map((p) => {
         const score = local[p.id];
         return (
-          <div key={p.id} className="flex items-center gap-2">
+          <div key={p.id} className="flex items-center gap-3">
             <span className="w-24 shrink-0 truncate text-sm font-semibold">
               {p.emoji} {p.name}
             </span>
-            <div className="flex flex-1 gap-1">
+            <div className="flex flex-1 gap-1.5">
               {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
                 <button
                   key={n}
-                  onClick={() => setScore(p.id, n)}
-                  className={`h-7 flex-1 rounded text-[10px] font-bold transition ${
+                  onClick={() => toggleScore(p.id, n)}
+                  className={`h-8 flex-1 rounded-md text-[11px] font-bold transition ${
                     score !== undefined && n <= score
                       ? "bg-accent text-black"
                       : "bg-surface-2 text-muted"
                   }`}
-                  title={`${n}/10`}
+                  title={score === n ? "Tap again to clear" : `${n}/10`}
                 >
                   {n}
                 </button>

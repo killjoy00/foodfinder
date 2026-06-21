@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { trackRestaurantAction } from "@/app/actions";
 import { CatalogEntry } from "@/lib/data/adapter";
@@ -80,9 +81,18 @@ export function BrowseClient({ catalog, home }: { catalog: CatalogEntry[]; home:
                   {dist !== null && ` · ${formatMiles(dist)}`}
                 </p>
               </div>
-              {added || c.tracked ? (
+              {added ? (
+                <div className="flex flex-col items-end gap-1">
+                  <span className="rounded-lg bg-green-950/60 px-3 py-2 text-sm font-semibold text-green-300">
+                    {added === "wishlist" ? "⭐ Added to wishlist" : "🍽️ Marked been there"}
+                  </span>
+                  <Link href={`/restaurants/${c.id}`} className="text-xs text-accent underline">
+                    Edit cuisine / tags →
+                  </Link>
+                </div>
+              ) : c.tracked ? (
                 <span className="rounded-lg bg-surface-2 px-3 py-2 text-sm font-semibold text-muted">
-                  {(added ?? c.trackedStatus) === "wishlist" ? "⭐ Wishlist" : "🍽️ On your list"}
+                  {c.trackedStatus === "wishlist" ? "⭐ Wishlist" : "🍽️ On your list"}
                 </span>
               ) : (
                 <div className="flex gap-1">

@@ -142,14 +142,21 @@ export const DEFAULT_SETTINGS: Settings = {
   radiusMeters: 8000,
 };
 
-/** Build a Google Maps deep link without needing an API key. */
-export function mapsLink(r: Pick<Restaurant, "name" | "address" | "mapsUrl" | "googlePlaceId">): string {
-  if (r.mapsUrl) return r.mapsUrl;
-  const query = encodeURIComponent([r.name, r.address].filter(Boolean).join(" "));
+/** Build a Google Maps deep link that reliably pins the right place. */
+export function mapsLink(
+  r: Pick<Restaurant, "name" | "address" | "mapsUrl" | "googlePlaceId" | "lat" | "lng">
+): string {
+  const text = encodeURIComponent([r.name, r.address].filter(Boolean).join(" "));
+  // a Google place id pins the exact business — most reliable
   if (r.googlePlaceId) {
-    return `https://www.google.com/maps/search/?api=1&query=${query}&query_place_id=${r.googlePlaceId}`;
+    return `https://www.google.com/maps/search/?api=1&query=${text}&query_place_id=${r.googlePlaceId}`;
   }
-  return `https://www.google.com/maps/search/?api=1&query=${query}`;
+  // otherwise drop a pin at the known coordinates
+  if (r.lat !== null && r.lng !== null) {
+    return `https://www.google.com/maps/search/?api=1&query=${r.lat}%2C${r.lng}`;
+  }
+  if (r.mapsUrl) return r.mapsUrl;
+  return `https://www.google.com/maps/search/?api=1&query=${text}`;
 }
 
 /**

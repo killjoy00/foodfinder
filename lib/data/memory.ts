@@ -509,6 +509,13 @@ export class MemoryAdapter implements DataAdapter {
     else s.ratings.push({ restaurantId, profileId, score });
   }
 
+  async clearRating(restaurantId: string, profileId: string): Promise<void> {
+    const s = store();
+    s.ratings = s.ratings.filter(
+      (r) => !(r.restaurantId === restaurantId && r.profileId === profileId)
+    );
+  }
+
   async addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
     store().visits.push({ id: randomUUID(), householdId: this.hid, restaurantId, date, mode, note });
   }

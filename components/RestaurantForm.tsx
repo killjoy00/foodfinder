@@ -60,7 +60,9 @@ export function RestaurantForm({
       skipNextSearch.current = false;
       return;
     }
-    if (name.trim().length < 3 || initial?.id) return;
+    // also offer Google autocomplete when editing — but not on first load or
+    // while the name still matches the saved one (only when you change it)
+    if (name.trim().length < 3 || name.trim() === (initial?.name ?? "").trim()) return;
     clearTimeout(debounce.current);
     debounce.current = setTimeout(async () => {
       setSearching(true);
@@ -77,7 +79,7 @@ export function RestaurantForm({
       }
     }, 400);
     return () => clearTimeout(debounce.current);
-  }, [name, initial?.id]);
+  }, [name, initial?.name]);
 
   function applySuggestion(s: PlaceSuggestion) {
     skipNextSearch.current = true;
@@ -110,6 +112,11 @@ export function RestaurantForm({
           className={inputCls}
         />
         {searching && <span className="text-xs text-muted">Searching Google…</span>}
+        {initial?.id && suggestions.length === 0 && !searching && (
+          <span className="text-xs text-muted">
+            Tip: tweak the name to re-search Google and refresh the address, map, and category.
+          </span>
+        )}
         {suggestions.length > 0 && (
           <div className="mt-1 overflow-hidden rounded-xl border border-border-soft">
             {suggestions.map((s) => (

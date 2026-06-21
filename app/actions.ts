@@ -227,6 +227,13 @@ export async function setRatingAction(
   revalidatePath("/restaurants");
 }
 
+export async function clearRatingAction(restaurantId: string, profileId: string): Promise<void> {
+  await requireProfile();
+  await (await db()).clearRating(restaurantId, profileId);
+  revalidatePath(`/restaurants/${restaurantId}`);
+  revalidatePath("/restaurants");
+}
+
 // ---------- visits ----------
 
 export async function logVisitAction(

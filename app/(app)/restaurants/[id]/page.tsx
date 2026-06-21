@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   deleteRestaurantAction,
@@ -10,6 +9,7 @@ import { PRICE_LABELS, daysSince, mapsLink, openTableLink } from "@/lib/types";
 import { RestaurantForm } from "@/components/RestaurantForm";
 import { RatingRows } from "@/components/RatingRows";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
+import { BackLink } from "@/components/BackLink";
 
 export default async function RestaurantPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -25,9 +25,9 @@ export default async function RestaurantPage({ params }: { params: Promise<{ id:
   return (
     <div className="flex flex-col gap-5 pt-2">
       <div>
-        <Link href="/restaurants" className="text-sm text-muted">
+        <BackLink fallback="/restaurants" className="text-sm text-muted">
           ← All places
-        </Link>
+        </BackLink>
         <h1 className="mt-1 text-2xl font-bold">{restaurant.name}</h1>
         <p className="text-muted">
           {restaurant.cuisines.join(" · ") || "uncategorized"} ·{" "}
