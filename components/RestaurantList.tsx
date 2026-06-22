@@ -36,7 +36,7 @@ export function RestaurantList({
   const [view, setView] = useState<"active" | "wishlist">("active");
   const [mode, setMode] = useState<"list" | "map">("list");
   const [pending, startTransition] = useTransition();
-  const [loggedId, setLoggedId] = useState<string | null>(null);
+  const [loggedIds, setLoggedIds] = useState<Set<string>>(new Set());
   const [confirmClear, setConfirmClear] = useState(false);
   const hasHome = home.lat !== null && home.lng !== null;
   const wishlistCount = restaurants.filter((r) => r.status === "wishlist").length;
@@ -186,7 +186,7 @@ export function RestaurantList({
                 >
                   ✓ Been
                 </button>
-              ) : loggedId === r.id ? (
+              ) : loggedIds.has(r.id) ? (
                 <span className="rounded-lg bg-green-950/60 px-3 py-2 text-sm font-semibold text-green-300">
                   Logged 🎉
                 </span>
@@ -196,11 +196,12 @@ export function RestaurantList({
                   onClick={() =>
                     startTransition(async () => {
                       await logVisitAction(r.id, "dine_in");
-                      setLoggedId(r.id);
+                      setLoggedIds((prev) => new Set(prev).add(r.id));
                     })
                   }
                   className="rounded-lg bg-surface-2 px-3 py-2 text-sm font-semibold"
                   title="One-tap: we ate here today"
+                  aria-label={`Log a visit to ${r.name}`}
                 >
                   +1 visit
                 </button>

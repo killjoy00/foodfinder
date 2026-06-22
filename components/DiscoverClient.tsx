@@ -128,6 +128,7 @@ export function DiscoverClient({
                   onClick={() => startTransition(() => dismissDiscoveryAction(d.placeId))}
                   className="rounded-lg bg-surface-2 px-3 py-2 text-sm"
                   title="Not interested"
+                  aria-label={`Dismiss ${d.name}`}
                 >
                   ✕
                 </button>

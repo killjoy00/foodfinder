@@ -102,6 +102,7 @@ export function VotePanel({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="rounded-lg bg-surface-2 px-2 py-1 text-sm"
+                aria-label={`Open ${r.name} in Google Maps`}
               >
                 🗺️
               </a>
@@ -113,6 +114,8 @@ export function VotePanel({
                 }}
                 className={`rounded-lg px-2 py-1 text-xl ${isVeto ? "bg-red-900" : "bg-surface-2"}`}
                 title="Veto"
+                aria-label={`Veto ${r.name}`}
+                aria-pressed={isVeto}
               >
                 🚫
               </button>

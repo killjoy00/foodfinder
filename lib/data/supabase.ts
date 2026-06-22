@@ -308,8 +308,11 @@ export class SupabaseAdapter implements DataAdapter {
       );
       if (byPid) return byPid.id;
     }
+    // case-insensitive exact match; escape LIKE wildcards so a literal "%"
+    // or "_" in a name doesn't match unrelated rows
+    const pattern = data.name.trim().replace(/[\\%_]/g, "\\$&");
     const byName = await unwrap(
-      this.client.from("restaurants").select("id").ilike("name", data.name).limit(1).maybeSingle()
+      this.client.from("restaurants").select("id").ilike("name", pattern).limit(1).maybeSingle()
     );
     return byName?.id ?? null;
   }
@@ -569,6 +572,8 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async clearRating(restaurantId: string, profileId: string): Promise<void> {
+    const members = await this.memberIds();
+    if (!members.includes(profileId)) return;
     await unwrap(
       this.client
         .from("ratings")

@@ -110,7 +110,10 @@ export function TonightPicker({
     const candidates = collapseChains(usable, origin);
     const picked = pickTonight(candidates, f, cuisineRecency);
     if (!picked) return;
-    const pool = [...buildCandidates(candidates, f, cuisineRecency).regulars, ...wishlist];
+    // build the wheel pool from THIS spin's candidates so a just-rerolled
+    // (excluded) place can't reappear via a stale closure
+    const built = buildCandidates(candidates, f, cuisineRecency);
+    const pool = [...built.regulars, ...built.wishlist];
     setWinner(picked);
     setSegments(wheelSegments(picked, pool.length > 1 ? pool : [picked]));
     setLogged(false);
@@ -308,14 +311,15 @@ export function TonightPicker({
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              disabled={geoMsg === "Finding you…"}
               onClick={() => (nearMe ? setNearMe(false) : enableNearMe())}
-              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+              className={`rounded-full border px-3 py-1.5 text-sm transition disabled:opacity-50 ${
                 nearMe
                   ? "border-accent bg-accent-soft font-semibold text-orange-200"
                   : "border-border-soft bg-surface-2 text-muted"
               }`}
             >
-              📍 {nearMe ? "Near me now" : "Use my location"}
+              📍 {geoMsg === "Finding you…" ? "Finding…" : nearMe ? "Near me now" : "Use my location"}
             </button>
             {!hasOrigin && !nearMe && (
               <span className="text-xs text-muted">set home in Settings to show distances</span>

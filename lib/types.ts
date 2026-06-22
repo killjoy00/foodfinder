@@ -88,6 +88,7 @@ export type RestaurantFull = Restaurant & {
   ratings: Record<string, number>; // profileId -> 1-10
   lastVisitAt: string | null;
   visitCount: number;
+  chainCount?: number; // >1 when this entry represents several collapsed chain locations
 };
 
 export type VisitMode = "dine_in" | "takeout";

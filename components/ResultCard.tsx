@@ -47,6 +47,11 @@ export function ResultCard({
               ? " · first time! 🎈"
               : ""}
         </p>
+        {r.chainCount && r.chainCount > 1 && (
+          <p className="mt-1 text-sm text-orange-200">
+            📍 Nearest of {r.chainCount} locations{r.address ? ` · ${r.address}` : ""}
+          </p>
+        )}
       </div>
 
       {candidate.reasons.length > 0 && (
@@ -113,6 +118,7 @@ export function ResultCard({
             onClick={() => setMode(mode === "dine_in" ? "takeout" : "dine_in")}
             className="rounded-xl border border-border-soft bg-surface-2 px-3 text-xl"
             title="Toggle dine in / takeout"
+            aria-label={`Logging as ${mode === "dine_in" ? "dine in" : "takeout"} — tap to switch`}
           >
             {mode === "dine_in" ? "🍽️" : "🥡"}
           </button>

@@ -225,6 +225,7 @@ export function collapseChains(
       visitCount: locs.reduce((a, l) => a + l.visitCount, 0),
       status: locs.some((l) => l.status === "active") ? "active" : "wishlist",
       cuisines: [...new Set(locs.flatMap((l) => l.cuisines))],
+      chainCount: locs.length,
     });
   }
   return out;

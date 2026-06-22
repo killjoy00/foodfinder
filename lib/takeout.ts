@@ -41,8 +41,7 @@ function parseFeature(feature: AnyRecord): TakeoutItem | null {
     str(location.name) ?? str(location["Business Name"]) ?? str(props.Title) ?? str(props.name);
   if (!name) return null;
 
-  const address =
-    str(location.address) ?? str(location.Address) ?? str(location["Geo Coordinates"] ? null : null);
+  const address = str(location.address) ?? str(location.Address);
 
   const geometry = (feature.geometry ?? {}) as AnyRecord;
   const coords = Array.isArray(geometry.coordinates) ? (geometry.coordinates as unknown[]) : [];
@@ -88,7 +87,16 @@ export function parseTakeout(jsonText: string): TakeoutItem[] {
   for (const feature of features) {
     const item = parseFeature(feature);
     if (!item) continue;
-    const key = item.placeId ?? `${item.name}|${item.address ?? ""}`.toLowerCase();
+    // dedupe by place id; else by name+address; else (no address) fall back to
+    // name+coords so two distinct same-name places aren't wrongly merged
+    const key = (
+      item.placeId ??
+      (item.address
+        ? `${item.name}|${item.address}`
+        : item.lat !== null && item.lng !== null
+          ? `${item.name}|${item.lat},${item.lng}`
+          : item.name)
+    ).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     items.push(item);

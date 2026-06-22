@@ -511,6 +511,8 @@ export class MemoryAdapter implements DataAdapter {
 
   async clearRating(restaurantId: string, profileId: string): Promise<void> {
     const s = store();
+    const member = s.profiles.some((p) => p.id === profileId && p.householdId === this.hid);
+    if (!member) return;
     s.ratings = s.ratings.filter(
       (r) => !(r.restaurantId === restaurantId && r.profileId === profileId)
     );
