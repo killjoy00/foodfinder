@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
+  changeGroupPassword,
   clearActiveProfile,
   createHousehold,
   loginToHousehold,
@@ -66,6 +67,20 @@ export async function switchProfileAction(): Promise<void> {
 export async function logoutAction(): Promise<void> {
   await logout();
   redirect("/login");
+}
+
+export async function changePasswordAction(
+  _prev: { ok: boolean; message: string } | null,
+  formData: FormData
+): Promise<{ ok: boolean; message: string }> {
+  await requireProfile();
+  const next = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+  if (next !== confirm) return { ok: false, message: "The two passwords don't match." };
+  const result = await changeGroupPassword(next);
+  return result.ok
+    ? { ok: true, message: "Password updated. Everyone uses the new one next time they log in." }
+    : { ok: false, message: result.error ?? "Couldn't update the password." };
 }
 
 export async function addProfileAction(formData: FormData): Promise<void> {
@@ -151,11 +166,20 @@ export async function updateRestaurantAction(id: string, formData: FormData): Pr
   await requireProfile();
   const adapter = await db();
   const existing = await adapter.getRestaurant(id);
-  const data = await ensureCoords(restaurantFromForm(formData), existing?.address ?? null);
-  if (!data.name) return;
-  await adapter.updateRestaurant(id, data);
+  const { cuisines, ...rest } = await ensureCoords(
+    restaurantFromForm(formData),
+    existing?.address ?? null
+  );
+  if (!rest.name) return;
+  // name/price/address/tags/status/notes update the shared catalog + group link;
+  // cuisines are stored as a per-family override so they don't change for other groups
+  await adapter.updateRestaurant(id, rest);
+  const settings = await adapter.getSettings();
+  const overrides = { ...(settings.cuisineOverrides ?? {}), [id]: cuisines };
+  await adapter.saveSettings({ ...settings, cuisineOverrides: overrides });
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
+  revalidatePath("/");
 }
 
 export async function deleteRestaurantAction(id: string): Promise<void> {
@@ -518,20 +542,18 @@ export async function saveLocationAction(
   const manualLat = num("homeLat");
   const manualLng = num("homeLng");
 
+  const adapter = await db();
+  const prev = await adapter.getSettings(); // preserve cuisineOverrides etc.
   let settings: Settings;
   if (zip) {
     const hit = await zipToCoords(zip);
     if (!hit) {
       return { ok: false, message: `Couldn't find ZIP code "${zip}" — double-check it?` };
     }
-    settings = {
-      homeLabel: `${hit.label} (${zip})`,
-      homeLat: hit.lat,
-      homeLng: hit.lng,
-      radiusMeters,
-    };
+    settings = { ...prev, homeLabel: `${hit.label} (${zip})`, homeLat: hit.lat, homeLng: hit.lng, radiusMeters };
   } else if (manualLat !== null && manualLng !== null) {
     settings = {
+      ...prev,
       homeLabel: String(formData.get("homeLabel") ?? "").trim() || "Home",
       homeLat: manualLat,
       homeLng: manualLng,
@@ -541,7 +563,7 @@ export async function saveLocationAction(
     return { ok: false, message: "Enter a ZIP code (or coordinates under Advanced)." };
   }
 
-  await (await db()).saveSettings(settings);
+  await adapter.saveSettings(settings);
   revalidatePath("/settings");
   revalidatePath("/discover");
   return { ok: true, message: `Home set to ${settings.homeLabel} ✓` };

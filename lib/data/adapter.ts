@@ -49,6 +49,7 @@ export interface HouseholdRegistry {
   findHouseholdByName(name: string): Promise<HouseholdAuth | null>;
   getHousehold(id: string): Promise<Household | null>;
   listHouseholds(): Promise<Household[]>;
+  setHouseholdPassword(id: string, passwordHash: string): Promise<void>;
 }
 
 export interface DataAdapter {

@@ -214,6 +214,10 @@ export class MemoryRegistry implements HouseholdRegistry {
   async listHouseholds(): Promise<Household[]> {
     return store().households.map((h) => ({ id: h.id, name: h.name }));
   }
+  async setHouseholdPassword(id: string, passwordHash: string): Promise<void> {
+    const h = store().households.find((x) => x.id === id);
+    if (h) h.passwordHash = passwordHash;
+  }
 }
 
 export class MemoryAdapter implements DataAdapter {
@@ -229,8 +233,10 @@ export class MemoryAdapter implements DataAdapter {
     const visits = s.visits
       .filter((v) => v.restaurantId === c.id && v.householdId === this.hid)
       .sort((a, b) => b.date.localeCompare(a.date));
+    const override = s.settings.find((x) => x.householdId === this.hid)?.value.cuisineOverrides?.[c.id];
     return {
       ...c,
+      cuisines: override ?? c.cuisines,
       status: link.status,
       notes: link.notes,
       ratings,

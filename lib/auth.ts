@@ -60,6 +60,22 @@ export async function createHousehold(
   return { ok: true };
 }
 
+/**
+ * Change the logged-in group's password. Being logged in (a valid signed
+ * household cookie) is itself proof of access — so this also doubles as
+ * recovery: any still-logged-in device can reset a forgotten password.
+ */
+export async function changeGroupPassword(
+  newPassword: string
+): Promise<{ ok: boolean; error?: string }> {
+  if (newPassword.length < 4) return { ok: false, error: "Pick a password (4+ characters)." };
+  if (isDemoMode()) return { ok: false, error: "Passwords aren't used in demo mode." };
+  const id = await getActiveHouseholdId();
+  if (!id) return { ok: false, error: "You're not logged into a group." };
+  await registry().setHouseholdPassword(id, passwordHash(newPassword));
+  return { ok: true };
+}
+
 export async function logout(): Promise<void> {
   await clearActiveProfile();
   await clearActiveHousehold();

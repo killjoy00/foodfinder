@@ -137,6 +137,28 @@ describe("MemoryAdapter master catalog", () => {
   });
 });
 
+describe("per-family cuisine overrides", () => {
+  beforeEach(freshStore);
+
+  it("applies a group's cuisine override without touching the shared catalog", async () => {
+    const a = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const other = await new MemoryRegistry().createHousehold("Cousins", "h");
+    const b = new MemoryAdapter(other.id);
+
+    const made = await a.createRestaurant(newRestaurant({ name: "Shared Spot", cuisines: ["American"] }));
+    await b.trackRestaurant(made.id, "active");
+
+    // group A overrides the cuisine for itself
+    const settings = await a.getSettings();
+    await a.saveSettings({ ...settings, cuisineOverrides: { [made.id]: ["BBQ", "Tacos"] } });
+
+    const inA = (await a.listRestaurants()).find((r) => r.id === made.id);
+    const inB = (await b.listRestaurants()).find((r) => r.id === made.id);
+    expect(inA?.cuisines).toEqual(["BBQ", "Tacos"]); // A sees its override
+    expect(inB?.cuisines).toEqual(["American"]); // B still sees the catalog value
+  });
+});
+
 describe("multi-group isolation", () => {
   beforeEach(freshStore);
 

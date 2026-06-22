@@ -1,8 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { clearRatingAction, setRatingAction } from "@/app/actions";
 import { Profile } from "@/lib/types";
+
+function ratingsKey(r: Record<string, number>): string {
+  return Object.entries(r)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([k, v]) => `${k}:${v}`)
+    .join(",");
+}
 
 export function RatingRows({
   restaurantId,
@@ -13,14 +21,33 @@ export function RatingRows({
   profiles: Profile[];
   ratings: Record<string, number>;
 }) {
+  const router = useRouter();
   const [local, setLocal] = useState<Record<string, number | undefined>>(ratings);
-  const [, startTransition] = useTransition();
+  const [isPending, startTransition] = useTransition();
+
+  // Reconcile with the server whenever incoming ratings change (another
+  // member rated, a rating was removed, etc.) — but never clobber an edit
+  // that's still in flight.
+  const serverKey = ratingsKey(ratings);
+  useEffect(() => {
+    if (!isPending) setLocal(ratings);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverKey]);
+
+  // Poll for other devices' changes so ratings update live on this page.
+  const pendingRef = useRef(isPending);
+  pendingRef.current = isPending;
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (!pendingRef.current) router.refresh();
+    }, 6000);
+    return () => clearInterval(t);
+  }, [router]);
 
   // tap a number to set it; tap the same number again to clear the rating
   function toggleScore(profileId: string, score: number) {
     setLocal((prev) => {
-      const current = prev[profileId];
-      const next = current === score ? undefined : score;
+      const next = prev[profileId] === score ? undefined : score;
       startTransition(() =>
         next === undefined
           ? clearRatingAction(restaurantId, profileId)
@@ -50,6 +77,7 @@ export function RatingRows({
                       : "bg-surface-2 text-muted"
                   }`}
                   title={score === n ? "Tap again to clear" : `${n}/10`}
+                  aria-label={`${p.name}: rate ${n} of 10`}
                 >
                   {n}
                 </button>

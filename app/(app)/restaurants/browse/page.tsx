@@ -1,14 +1,19 @@
 import Link from "next/link";
 import { db } from "@/lib/data";
+import { buildTokenAffinity, recommendFromCatalog } from "@/lib/catalogRecommend";
 import { BrowseClient } from "@/components/BrowseClient";
 
 export const dynamic = "force-dynamic";
 
 export default async function BrowsePage() {
-  const [catalog, settings] = await Promise.all([
+  const [catalog, settings, restaurants] = await Promise.all([
     (await db()).listCatalog(),
     (await db()).getSettings(),
+    (await db()).listRestaurants(),
   ]);
+  const affinity = buildTokenAffinity(restaurants);
+  const picks = recommendFromCatalog(catalog, affinity, { limit: 12 }).map((p) => p.entry.id);
+
   return (
     <div className="flex flex-col gap-4 pt-2">
       <div>
@@ -21,7 +26,11 @@ export default async function BrowsePage() {
           wishlist or mark them visited.
         </p>
       </div>
-      <BrowseClient catalog={catalog} home={{ lat: settings.homeLat, lng: settings.homeLng }} />
+      <BrowseClient
+        catalog={catalog}
+        home={{ lat: settings.homeLat, lng: settings.homeLng }}
+        pickIds={picks}
+      />
     </div>
   );
 }

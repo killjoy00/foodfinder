@@ -2,6 +2,7 @@ import Link from "next/link";
 import { deleteProfileAction, logoutAction, updateProfileAction } from "@/app/actions";
 import { LocationForm } from "@/components/LocationForm";
 import { ProfileEditor } from "@/components/ProfileEditor";
+import { ChangePasswordForm } from "@/components/ChangePasswordForm";
 import { getActiveHousehold } from "@/lib/auth";
 import { db, isDemoMode } from "@/lib/data";
 import { placesKey } from "@/lib/places";
@@ -89,6 +90,11 @@ export default async function SettingsPage() {
           You&apos;re in <strong className="text-foreground">{household?.name ?? "—"}</strong>. Share
           the group name and password to let other family in; they each pick their own profile.
         </p>
+        <p className="text-xs text-muted">
+          Passwords are stored encrypted and can&apos;t be shown. Forgot it? As long as one device
+          stays logged in (the login lasts a year), set a new one here.
+        </p>
+        <ChangePasswordForm />
         <form action={logoutAction}>
           <button className="w-full rounded-xl border border-border-soft px-4 py-2 text-sm font-semibold">
             Log out / switch group

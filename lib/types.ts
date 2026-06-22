@@ -134,6 +134,9 @@ export type Settings = {
   homeLat: number | null;
   homeLng: number | null;
   radiusMeters: number;
+  // per-group cuisine overrides (restaurantId -> cuisines) so a family can
+  // recategorize a shared-catalog place without changing it for everyone
+  cuisineOverrides?: Record<string, string[]>;
 };
 
 export const DEFAULT_SETTINGS: Settings = {

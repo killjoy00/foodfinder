@@ -150,6 +150,9 @@ export class SupabaseRegistry implements HouseholdRegistry {
     const rows = await unwrap(this.client.from("households").select("id, name"));
     return (rows ?? []).map((r: Row) => ({ id: r.id, name: r.name }));
   }
+  async setHouseholdPassword(id: string, passwordHash: string): Promise<void> {
+    await unwrap(this.client.from("households").update({ password_hash: passwordHash }).eq("id", id));
+  }
 }
 
 export class SupabaseAdapter implements DataAdapter {
@@ -248,6 +251,7 @@ export class SupabaseAdapter implements DataAdapter {
       }
     }
 
+    const overrides = (await this.getSettings()).cuisineOverrides ?? {};
     const catalogById = new Map((catalogRows ?? []).map((r: Row) => [r.id, rowToCatalog(r)]));
     const ratingsByR = new Map<string, Record<string, number>>();
     for (const row of (ratingRows ?? []) as Row[]) {
@@ -269,6 +273,7 @@ export class SupabaseAdapter implements DataAdapter {
       if (!c) continue;
       out.push({
         ...c,
+        cuisines: overrides[link.restaurant_id] ?? c.cuisines,
         status: link.status,
         notes: link.notes,
         ratings: ratingsByR.get(link.restaurant_id) ?? {},
