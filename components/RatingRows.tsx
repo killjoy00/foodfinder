@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 import { clearRatingAction, setRatingAction } from "@/app/actions";
 import { Profile } from "@/lib/types";
 
@@ -21,28 +20,17 @@ export function RatingRows({
   profiles: Profile[];
   ratings: Record<string, number>;
 }) {
-  const router = useRouter();
   const [local, setLocal] = useState<Record<string, number | undefined>>(ratings);
   const [isPending, startTransition] = useTransition();
 
-  // Reconcile with the server whenever incoming ratings change (another
-  // member rated, a rating was removed, etc.) — but never clobber an edit
-  // that's still in flight.
+  // Reconcile with the server whenever the incoming ratings change (your own
+  // change after it saves, another member's rating once you revisit/refresh,
+  // a removed rating) — but never clobber an edit that's still in flight.
   const serverKey = ratingsKey(ratings);
   useEffect(() => {
     if (!isPending) setLocal(ratings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverKey]);
-
-  // Poll for other devices' changes so ratings update live on this page.
-  const pendingRef = useRef(isPending);
-  pendingRef.current = isPending;
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (!pendingRef.current) router.refresh();
-    }, 6000);
-    return () => clearInterval(t);
-  }, [router]);
 
   // tap a number to set it; tap the same number again to clear the rating
   function toggleScore(profileId: string, score: number) {

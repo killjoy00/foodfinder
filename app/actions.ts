@@ -174,9 +174,13 @@ export async function updateRestaurantAction(id: string, formData: FormData): Pr
   // name/price/address/tags/status/notes update the shared catalog + group link;
   // cuisines are stored as a per-family override so they don't change for other groups
   await adapter.updateRestaurant(id, rest);
-  const settings = await adapter.getSettings();
-  const overrides = { ...(settings.cuisineOverrides ?? {}), [id]: cuisines };
-  await adapter.saveSettings({ ...settings, cuisineOverrides: overrides });
+  try {
+    const settings = await adapter.getSettings();
+    const overrides = { ...(settings.cuisineOverrides ?? {}), [id]: cuisines };
+    await adapter.saveSettings({ ...settings, cuisineOverrides: overrides });
+  } catch {
+    // a settings failure shouldn't break the core edit
+  }
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
   revalidatePath("/");

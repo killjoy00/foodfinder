@@ -737,21 +737,37 @@ export class SupabaseAdapter implements DataAdapter {
 
   async upsertDiscoveries(items: DiscoveryInput[]): Promise<number> {
     if (items.length === 0) return 0;
-    const rows = items.map((d) => ({
-      household_id: this.hid,
-      place_id: d.placeId,
-      name: d.name,
-      address: d.address,
-      rating: d.rating,
-      maps_url: d.mapsUrl,
-    }));
-    const inserted = await unwrap(
-      this.client
-        .from("discoveries")
-        .upsert(rows, { onConflict: "household_id,place_id", ignoreDuplicates: true })
-        .select("place_id")
+    const existing = new Set(await this.seenDiscoveryIds(items.map((d) => d.placeId)));
+    const fresh = items.filter((d) => !existing.has(d.placeId));
+    if (fresh.length === 0) return 0;
+    await unwrap(
+      this.client.from("discoveries").insert(
+        fresh.map((d) => ({
+          household_id: this.hid,
+          place_id: d.placeId,
+          name: d.name,
+          address: d.address,
+          rating: d.rating,
+          maps_url: d.mapsUrl,
+        }))
+      )
     );
-    return (inserted ?? []).length;
+    return fresh.length;
+  }
+
+  private async seenDiscoveryIds(placeIds: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (const part of chunk(placeIds, IN_CHUNK)) {
+      const rows = await unwrap(
+        this.client
+          .from("discoveries")
+          .select("place_id")
+          .eq("household_id", this.hid)
+          .in("place_id", part)
+      );
+      out.push(...(rows ?? []).map((r: Row) => r.place_id));
+    }
+    return out;
   }
 
   async dismissDiscovery(placeId: string): Promise<void> {
@@ -773,28 +789,40 @@ export class SupabaseAdapter implements DataAdapter {
 
   async markPlacesSeen(placeIds: string[]): Promise<void> {
     if (placeIds.length === 0) return;
+    const existing = new Set<string>();
+    for (const part of chunk(placeIds, IN_CHUNK)) {
+      const rows = await unwrap(
+        this.client.from("seen_places").select("place_id").eq("household_id", this.hid).in("place_id", part)
+      );
+      for (const r of (rows ?? []) as Row[]) existing.add(r.place_id);
+    }
+    const fresh = [...new Set(placeIds)].filter((p) => !existing.has(p));
+    if (fresh.length === 0) return;
     await unwrap(
-      this.client
-        .from("seen_places")
-        .upsert(placeIds.map((place_id) => ({ household_id: this.hid, place_id })), {
-          onConflict: "household_id,place_id",
-          ignoreDuplicates: true,
-        })
+      this.client.from("seen_places").insert(fresh.map((place_id) => ({ household_id: this.hid, place_id })))
     );
   }
 
   async getSettings(): Promise<Settings> {
-    const row = await unwrap(
-      this.client.from("settings").select("value").eq("household_id", this.hid).maybeSingle()
+    // limit(1) so this never throws even if the settings table somehow has
+    // duplicate rows for a household
+    const rows = await unwrap(
+      this.client.from("settings").select("value").eq("household_id", this.hid).limit(1)
     );
-    return row?.value ? { ...DEFAULT_SETTINGS, ...row.value } : { ...DEFAULT_SETTINGS };
+    const value = (rows ?? [])[0]?.value;
+    return value ? { ...DEFAULT_SETTINGS, ...value } : { ...DEFAULT_SETTINGS };
   }
 
   async saveSettings(settings: Settings): Promise<void> {
-    await unwrap(
-      this.client
-        .from("settings")
-        .upsert({ household_id: this.hid, value: settings }, { onConflict: "household_id" })
+    // Manual upsert (no ON CONFLICT) so this works regardless of whether the
+    // settings table has a unique constraint on household_id.
+    const rows = await unwrap(
+      this.client.from("settings").select("household_id").eq("household_id", this.hid).limit(1)
     );
+    if ((rows ?? []).length > 0) {
+      await unwrap(this.client.from("settings").update({ value: settings }).eq("household_id", this.hid));
+    } else {
+      await unwrap(this.client.from("settings").insert({ household_id: this.hid, value: settings }));
+    }
   }
 }
