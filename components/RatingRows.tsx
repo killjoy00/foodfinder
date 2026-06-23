@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { startTransition, useOptimistic } from "react";
 import { clearRatingAction, setRatingAction } from "@/app/actions";
 import { Profile } from "@/lib/types";
-
-function ratingsKey(r: Record<string, number>): string {
-  return Object.entries(r)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",");
-}
 
 export function RatingRows({
   restaurantId,
@@ -20,35 +13,34 @@ export function RatingRows({
   profiles: Profile[];
   ratings: Record<string, number>;
 }) {
-  const [local, setLocal] = useState<Record<string, number | undefined>>(ratings);
-  const [isPending, startTransition] = useTransition();
-
-  // Reconcile with the server whenever the incoming ratings change (your own
-  // change after it saves, another member's rating once you revisit/refresh,
-  // a removed rating) — but never clobber an edit that's still in flight.
-  const serverKey = ratingsKey(ratings);
-  useEffect(() => {
-    if (!isPending) setLocal(ratings);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serverKey]);
+  // The server `ratings` prop is the source of truth (it also reflects another
+  // member's change once you refresh/navigate). `useOptimistic` overlays the
+  // in-flight edit on top of it and — crucially — keeps that overlay alive for
+  // exactly the same transition that saves + revalidates, so the handoff back
+  // to fresh server state is atomic. That avoids the race the old manual
+  // reconcile had, where a second rating could be clobbered back to the first.
+  const [optimistic, applyOptimistic] = useOptimistic<
+    Record<string, number | undefined>,
+    { profileId: string; score: number | undefined }
+  >(ratings, (state, { profileId, score }) => ({ ...state, [profileId]: score }));
 
   // tap a number to set it; tap the same number again to clear the rating
   function toggleScore(profileId: string, score: number) {
-    setLocal((prev) => {
-      const next = prev[profileId] === score ? undefined : score;
-      startTransition(() =>
-        next === undefined
-          ? clearRatingAction(restaurantId, profileId)
-          : setRatingAction(restaurantId, profileId, next)
-      );
-      return { ...prev, [profileId]: next };
+    const next = optimistic[profileId] === score ? undefined : score;
+    startTransition(async () => {
+      applyOptimistic({ profileId, score: next });
+      if (next === undefined) {
+        await clearRatingAction(restaurantId, profileId);
+      } else {
+        await setRatingAction(restaurantId, profileId, next);
+      }
     });
   }
 
   return (
     <div className="flex flex-col gap-4">
       {profiles.map((p) => {
-        const score = local[p.id];
+        const score = optimistic[p.id];
         return (
           <div key={p.id} className="flex items-center gap-3">
             <span className="w-24 shrink-0 truncate text-sm font-semibold">
