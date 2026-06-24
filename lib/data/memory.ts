@@ -6,6 +6,7 @@ import {
   Profile,
   Restaurant,
   RestaurantFull,
+  RestaurantLocation,
   Settings,
   Visit,
   VisitMode,
@@ -15,6 +16,22 @@ import {
 import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewRestaurant } from "./adapter";
 
 type CatalogRestaurant = Omit<Restaurant, "status" | "notes">;
+
+function catalogToLocation(c: CatalogRestaurant): RestaurantLocation {
+  return {
+    id: c.id,
+    name: c.name,
+    address: c.address,
+    lat: c.lat,
+    lng: c.lng,
+    googlePlaceId: c.googlePlaceId,
+    mapsUrl: c.mapsUrl,
+    reserveUrl: c.reserveUrl,
+    price: c.price,
+    cuisines: c.cuisines,
+    tags: c.tags,
+  };
+}
 type HouseholdRow = { id: string; name: string; nameKey: string; passwordHash: string };
 type GroupRestaurant = {
   householdId: string;
@@ -242,6 +259,8 @@ export class MemoryAdapter implements DataAdapter {
       ratings,
       lastVisitAt: visits[0]?.date ?? null,
       visitCount: visits.length,
+      locations: [catalogToLocation({ ...c, cuisines: override ?? c.cuisines })],
+      locationCount: 1,
     };
   }
 

@@ -37,6 +37,8 @@ describe("restaurantsCsv", () => {
         ratings: { p1: 9 },
         lastVisitAt: "2026-06-01T19:00:00Z",
         visitCount: 4,
+        locations: [],
+        locationCount: 0,
       },
     ];
     const csv = restaurantsCsv(restaurants, profiles);

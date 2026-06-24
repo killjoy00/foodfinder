@@ -21,6 +21,8 @@ function r(overrides: Partial<RestaurantFull>): RestaurantFull {
     ratings: {},
     lastVisitAt: null,
     visitCount: 0,
+    locations: [],
+    locationCount: 0,
     ...overrides,
   };
 }
