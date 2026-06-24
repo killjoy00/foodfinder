@@ -166,21 +166,11 @@ export async function updateRestaurantAction(id: string, formData: FormData): Pr
   await requireProfile();
   const adapter = await db();
   const existing = await adapter.getRestaurant(id);
-  const { cuisines, ...rest } = await ensureCoords(
-    restaurantFromForm(formData),
-    existing?.address ?? null
-  );
-  if (!rest.name) return;
-  // name/price/address/tags/status/notes update the shared catalog + group link;
-  // cuisines are stored as a per-family override so they don't change for other groups
-  await adapter.updateRestaurant(id, rest);
-  try {
-    const settings = await adapter.getSettings();
-    const overrides = { ...(settings.cuisineOverrides ?? {}), [id]: cuisines };
-    await adapter.saveSettings({ ...settings, cuisineOverrides: overrides });
-  } catch {
-    // a settings failure shouldn't break the core edit
-  }
+  const data = await ensureCoords(restaurantFromForm(formData), existing?.address ?? null);
+  if (!data.name) return;
+  // the adapter applies brand fields (name/status/notes/cuisines as a per-family
+  // override) and pushes catalog facts down only when the brand is one location
+  await adapter.updateRestaurant(id, data);
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${id}`);
   revalidatePath("/");
@@ -207,15 +197,25 @@ export async function trackRestaurantAction(
   await requireProfile();
   const adapter = await db();
   await adapter.trackRestaurant(restaurantId, status);
-  // catalog seeds (e.g. the Austin list) carry no coordinates; geocode on add
-  // so the family's distance filtering works for places they actually track
-  const r = await adapter.getRestaurant(restaurantId);
-  if (r && (r.lat === null || r.lng === null) && r.address) {
-    const point = await geocodeAddress(r.address);
-    if (point) await adapter.updateRestaurant(restaurantId, { lat: point.lat, lng: point.lng });
+  // catalog seeds (e.g. the Austin list) carry no coordinates; geocode the
+  // location on add so the family's distance filtering works
+  const loc = await adapter.getCatalogLocation(restaurantId);
+  if (loc && (loc.lat === null || loc.lng === null) && loc.address) {
+    const point = await geocodeAddress(loc.address);
+    if (point) await adapter.setLocationCoords(restaurantId, point.lat, point.lng);
   }
   revalidatePath("/restaurants");
   revalidatePath("/restaurants/browse");
+  revalidatePath("/");
+}
+
+/** Split one location out of a brand into its own entry. */
+export async function splitLocationAction(brandId: string, restaurantId: string): Promise<void> {
+  await requireProfile();
+  const newBrandId = await (await db()).splitLocation(brandId, restaurantId);
+  revalidatePath("/restaurants");
+  revalidatePath(`/restaurants/${brandId}`);
+  if (newBrandId) revalidatePath(`/restaurants/${newBrandId}`);
   revalidatePath("/");
 }
 

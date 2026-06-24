@@ -1,13 +1,13 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   deleteRestaurantAction,
   logVisitAction,
+  splitLocationAction,
   updateRestaurantAction,
 } from "@/app/actions";
 import { db } from "@/lib/data";
-import { chainKey } from "@/lib/picker";
 import { PRICE_LABELS, daysSince, mapsLink, openTableLink } from "@/lib/types";
+import { distanceMiles, formatMiles } from "@/lib/distance";
 import { RestaurantForm } from "@/components/RestaurantForm";
 import { RatingRows } from "@/components/RatingRows";
 import { ConfirmDelete } from "@/components/ConfirmDelete";
@@ -15,19 +15,20 @@ import { BackLink } from "@/components/BackLink";
 
 export default async function RestaurantPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [restaurant, profiles, visits, all] = await Promise.all([
+  const [restaurant, profiles, visits, settings] = await Promise.all([
     (await db()).getRestaurant(id),
     (await db()).listProfiles(),
     (await db()).listVisitsForRestaurant(id),
-    (await db()).listRestaurants(),
+    (await db()).getSettings(),
   ]);
   if (!restaurant) notFound();
 
   const days = daysSince(restaurant.lastVisitAt);
-  // other locations of the same brand the family also tracks
-  const siblings = all.filter(
-    (r) => r.id !== restaurant.id && chainKey(r.name) === chainKey(restaurant.name)
-  );
+  const home = { lat: settings.homeLat, lng: settings.homeLng };
+  // sort the brand's branches nearest-first when we know where home is
+  const locations = [...restaurant.locations]
+    .map((loc) => ({ loc, dist: distanceMiles(home, loc) }))
+    .sort((a, b) => (a.dist ?? Infinity) - (b.dist ?? Infinity));
 
   return (
     <div className="flex flex-col gap-5 pt-2">
@@ -39,24 +40,10 @@ export default async function RestaurantPage({ params }: { params: Promise<{ id:
         <p className="text-muted">
           {restaurant.cuisines.join(" · ") || "uncategorized"} ·{" "}
           {PRICE_LABELS[restaurant.price - 1]}
+          {restaurant.locationCount > 1 && ` · 📍 ${restaurant.locationCount} locations`}
           {days !== null && ` · last visit ${days}d ago`}
           {restaurant.status === "wishlist" && " · ⭐ wishlist"}
         </p>
-        {siblings.length > 0 && (
-          <div className="mt-2 rounded-xl border border-border-soft bg-surface-2 px-3 py-2 text-sm">
-            <span className="text-muted">
-              📍 You track {siblings.length + 1} locations of this place:
-            </span>{" "}
-            {siblings.map((s, i) => (
-              <span key={s.id}>
-                {i > 0 && ", "}
-                <Link href={`/restaurants/${s.id}`} className="text-accent underline">
-                  {s.address?.split(",")[0]?.trim() || s.name}
-                </Link>
-              </span>
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="flex gap-2">
@@ -81,6 +68,50 @@ export default async function RestaurantPage({ params }: { params: Promise<{ id:
       <section className="rounded-2xl border border-border-soft bg-surface p-4">
         <h2 className="mb-3 font-bold">Family ratings</h2>
         <RatingRows restaurantId={restaurant.id} profiles={profiles} ratings={restaurant.ratings} />
+      </section>
+
+      <section className="rounded-2xl border border-border-soft bg-surface p-4">
+        <h2 className="mb-3 font-bold">
+          {restaurant.locationCount > 1 ? `Locations (${restaurant.locationCount})` : "Location"}
+        </h2>
+        <ul className="flex flex-col gap-2">
+          {locations.map(({ loc, dist }) => (
+            <li key={loc.id} className="flex items-center gap-3 rounded-xl bg-surface-2 p-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold">
+                  {loc.address?.split(",")[0]?.trim() || loc.name}
+                </p>
+                <p className="truncate text-xs text-muted">
+                  {loc.address || "no address"}
+                  {dist !== null && ` · ${formatMiles(dist)}`}
+                </p>
+              </div>
+              <a
+                href={mapsLink(loc)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 rounded-lg bg-surface px-3 py-2 text-sm font-semibold"
+              >
+                🗺️ Maps
+              </a>
+              {restaurant.locationCount > 1 && (
+                <form
+                  action={async () => {
+                    "use server";
+                    await splitLocationAction(restaurant.id, loc.id);
+                  }}
+                >
+                  <button
+                    className="shrink-0 rounded-lg border border-border-soft px-3 py-2 text-sm text-muted"
+                    title="Make this its own separate entry"
+                  >
+                    Split out
+                  </button>
+                </form>
+              )}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="rounded-2xl border border-border-soft bg-surface p-4">

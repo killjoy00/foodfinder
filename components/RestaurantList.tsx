@@ -7,7 +7,6 @@ import { clearWishlistAction, logVisitAction, setStatusAction } from "@/app/acti
 import { PRICE_LABELS, RestaurantFull, daysSince } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { ratingStats } from "@/lib/ratings";
-import { chainKey, locationCounts } from "@/lib/picker";
 import { Chip } from "./ui";
 
 const MapView = dynamic(() => import("./MapView"), {
@@ -37,9 +36,6 @@ export function RestaurantList({
   const [confirmClear, setConfirmClear] = useState(false);
   const hasHome = home.lat !== null && home.lng !== null;
   const wishlistCount = restaurants.filter((r) => r.status === "wishlist").length;
-  // count locations per brand across everything tracked, so a family that
-  // tracks three Torchy's sees "📍 3 locations" on each of them
-  const locCounts = useMemo(() => locationCounts(restaurants), [restaurants]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -168,7 +164,7 @@ export function RestaurantList({
           const days = daysSince(r.lastVisitAt);
           const stats = ratingStats(r.ratings);
           const dist = hasHome ? formatMiles(distanceMiles(home, r)) : null;
-          const locs = locCounts.get(chainKey(r.name)) ?? 1;
+          const locs = r.locationCount;
           return (
             <li
               key={r.id}

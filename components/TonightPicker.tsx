@@ -21,7 +21,8 @@ import {
   isSpecialCuisine,
   specialCuisineEmoji,
 } from "@/lib/types";
-import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
+import { LatLng, formatMiles } from "@/lib/distance";
+import { brandDistanceMiles } from "@/lib/brand";
 import { logVisitAction, startVoteAction } from "@/app/actions";
 import { SpinWheel } from "./SpinWheel";
 import { ResultCard } from "./ResultCard";
@@ -61,15 +62,16 @@ export function TonightPicker({
   const origin: LatLng | null = nearMe && deviceOrigin ? deviceOrigin : home;
   const hasOrigin = origin?.lat !== null && origin?.lng !== null;
 
+  // measure to the brand's nearest located branch, not just its representative
   function distanceOf(r: RestaurantFull): number | null {
-    return distanceMiles(origin, r);
+    return brandDistanceMiles(r, origin);
   }
 
-  // when near-me is on with a fix, drop places that are out of range or unlocated
+  // when near-me is on with a fix, drop brands whose every branch is out of range
   const usable = useMemo(() => {
     if (!nearMe || !deviceOrigin) return restaurants;
     return restaurants.filter((r) => {
-      const d = distanceMiles(deviceOrigin, r);
+      const d = brandDistanceMiles(r, deviceOrigin);
       return d !== null && d <= maxDistance;
     });
   }, [restaurants, nearMe, deviceOrigin, maxDistance]);
