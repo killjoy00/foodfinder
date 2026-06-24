@@ -136,8 +136,16 @@ describe("quality bar (minScore)", () => {
     expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a", "c"] })).toBe(true);
   });
 
-  it("keeps unrated places (wishlist) eligible", () => {
-    expect(passesFilters(restaurant({ ratings: {} }), { ...DEFAULT_FILTERS, minScore: 8 })).toBe(true);
+  it("doesn't let a non-eater's rating sneak a place onto the wheel", () => {
+    // only Bob rated it; Alice is the one eating
+    const bobsPick = restaurant({ ratings: { b: 9 } });
+    expect(passesFilters(bobsPick, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a"] })).toBe(false);
+  });
+
+  it("keeps places nobody has rated (true wishlist) eligible", () => {
+    const untried = restaurant({ ratings: {} });
+    expect(passesFilters(untried, { ...DEFAULT_FILTERS, minScore: 8 })).toBe(true);
+    expect(passesFilters(untried, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a"] })).toBe(true);
   });
 
   it("minScore 0 turns the bar off", () => {
