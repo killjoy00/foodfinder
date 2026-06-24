@@ -6,6 +6,7 @@ import { useMemo, useState, useTransition } from "react";
 import { clearWishlistAction, logVisitAction, setStatusAction } from "@/app/actions";
 import { PRICE_LABELS, RestaurantFull, daysSince } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
+import { ratingStats } from "@/lib/ratings";
 import { Chip } from "./ui";
 
 const MapView = dynamic(() => import("./MapView"), {
@@ -17,12 +18,7 @@ const MapView = dynamic(() => import("./MapView"), {
   ),
 });
 
-type SortKey = "name" | "rating" | "recency";
-
-function avgRating(r: RestaurantFull): number {
-  const scores = Object.values(r.ratings);
-  return scores.length ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
-}
+type SortKey = "name" | "rating" | "consensus" | "recency";
 
 export function RestaurantList({
   restaurants,
@@ -52,7 +48,9 @@ export function RestaurantList({
           r.cuisines.some((c) => c.toLowerCase().includes(q))
       )
       .sort((a, b) => {
-        if (sort === "rating") return avgRating(b) - avgRating(a);
+        if (sort === "rating") return ratingStats(b.ratings).mean - ratingStats(a.ratings).mean;
+        if (sort === "consensus")
+          return ratingStats(b.ratings).consensus - ratingStats(a.ratings).consensus;
         if (sort === "recency") {
           return (a.lastVisitAt ?? "0000").localeCompare(b.lastVisitAt ?? "0000");
         }
@@ -117,6 +115,9 @@ export function RestaurantList({
         <Chip active={sort === "rating"} onClick={() => setSort("rating")}>
           Top rated
         </Chip>
+        <Chip active={sort === "consensus"} onClick={() => setSort("consensus")}>
+          🤝 Loved by all
+        </Chip>
         <Chip active={sort === "recency"} onClick={() => setSort("recency")}>
           Longest ago
         </Chip>
@@ -161,7 +162,7 @@ export function RestaurantList({
       <ul className="flex flex-col gap-2">
         {shown.map((r) => {
           const days = daysSince(r.lastVisitAt);
-          const avg = avgRating(r);
+          const stats = ratingStats(r.ratings);
           const dist = hasHome ? formatMiles(distanceMiles(home, r)) : null;
           return (
             <li
@@ -172,7 +173,8 @@ export function RestaurantList({
                 <p className="truncate font-bold">{r.name}</p>
                 <p className="truncate text-sm text-muted">
                   {r.cuisines.join(" · ") || "uncategorized"} · {PRICE_LABELS[r.price - 1]}
-                  {avg > 0 && ` · ★ ${avg.toFixed(1)}`}
+                  {stats.count > 0 && ` · ★ ${stats.mean.toFixed(1)} (${stats.count})`}
+                  {stats.divisive && " · 😬 split"}
                   {dist && ` · ${dist}`}
                   {days !== null && ` · ${days}d ago`}
                 </p>

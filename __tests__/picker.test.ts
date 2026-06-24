@@ -116,10 +116,23 @@ describe("quality bar (minScore)", () => {
     expect(passesFilters(dud, { ...DEFAULT_FILTERS, minScore: 5 })).toBe(false);
   });
 
-  it("passes if at least one family member likes it", () => {
+  it("requires every rater to clear the bar, not just one", () => {
+    // one member loves it, another can't stand it → it's out
     const split = restaurant({ ratings: { a: 3, b: 8 } });
-    expect(passesFilters(split, { ...DEFAULT_FILTERS, minScore: 5 })).toBe(true);
-    expect(passesFilters(split, { ...DEFAULT_FILTERS, minScore: 9 })).toBe(false);
+    expect(passesFilters(split, { ...DEFAULT_FILTERS, minScore: 5 })).toBe(false);
+    // everyone clears the bar → it stays
+    const agreed = restaurant({ ratings: { a: 8, b: 9 } });
+    expect(passesFilters(agreed, { ...DEFAULT_FILTERS, minScore: 8 })).toBe(true);
+  });
+
+  it("only judges the eaters at the table", () => {
+    const r = restaurant({ ratings: { a: 9, b: 2 } });
+    // b isn't eating, so b's low score doesn't disqualify it
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a"] })).toBe(true);
+    // b is eating → the 2 knocks it out
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a", "b"] })).toBe(false);
+    // an eater who hasn't rated it doesn't block it
+    expect(passesFilters(r, { ...DEFAULT_FILTERS, minScore: 8, eaterIds: ["a", "c"] })).toBe(true);
   });
 
   it("keeps unrated places (wishlist) eligible", () => {
@@ -129,6 +142,17 @@ describe("quality bar (minScore)", () => {
   it("minScore 0 turns the bar off", () => {
     const dud = restaurant({ ratings: { a: 1 } });
     expect(passesFilters(dud, { ...DEFAULT_FILTERS, minScore: 0 })).toBe(true);
+  });
+});
+
+describe("consensus weighting", () => {
+  it("down-weights places the eaters are split on", () => {
+    const eaters = { ...DEFAULT_FILTERS, eaterIds: ["a", "b"] };
+    const agreed = weighCandidate(restaurant({ ratings: { a: 8, b: 8 } }), eaters, {}, NOW);
+    const split = weighCandidate(restaurant({ ratings: { a: 10, b: 6 } }), eaters, {}, NOW);
+    // same average (8), but the divisive one is sent to the back
+    expect(split.weight).toBeLessThan(agreed.weight);
+    expect(split.reasons.join(" ")).toContain("split");
   });
 });
 

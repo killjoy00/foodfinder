@@ -46,15 +46,29 @@ export function eaterScore(r: RestaurantFull, eaterIds: string[]): number {
 }
 
 /**
- * Best rating among the selected eaters (all raters when nobody is
- * selected); null when none of them have rated it yet.
+ * Lowest rating among the selected eaters who have rated it (all raters when
+ * nobody is selected); null when none of them have rated it yet. The quality
+ * bar uses this so every eater at the table clears it, not just one of them.
  */
-export function maxRelevantScore(r: RestaurantFull, eaterIds: string[]): number | null {
+export function minRelevantScore(r: RestaurantFull, eaterIds: string[]): number | null {
   const ids = eaterIds.length > 0 ? eaterIds : Object.keys(r.ratings);
   const scores = ids
     .map((id) => r.ratings[id])
     .filter((s): s is number => s !== undefined);
-  return scores.length > 0 ? Math.max(...scores) : null;
+  return scores.length > 0 ? Math.min(...scores) : null;
+}
+
+/**
+ * How much the relevant eaters agree, as a 0.5–1.0 weight multiplier: a tight
+ * spread keeps the full weight, a wide split (8+ points) halves it. Fewer than
+ * two ratings can't disagree, so they keep full weight.
+ */
+function eaterAgreement(r: RestaurantFull, eaterIds: string[]): number {
+  const ids = eaterIds.length > 0 ? eaterIds : Object.keys(r.ratings);
+  const scores = ids.map((id) => r.ratings[id]).filter((s): s is number => s !== undefined);
+  if (scores.length < 2) return 1;
+  const spread = Math.max(...scores) - Math.min(...scores);
+  return 1 - (0.5 * Math.min(spread, 8)) / 8;
 }
 
 /** The special cuisines this restaurant carries (e.g. dessert, coffee). */
@@ -91,10 +105,11 @@ export function passesFilters(r: RestaurantFull, f: PickerFilters): boolean {
     if (!rSpecials.some((s) => selected.has(s))) return false;
   }
   if (f.minScore > 0) {
-    // the quality bar: someone eating tonight has to actually like it —
-    // unrated places stay eligible so the wishlist isn't locked out
-    const best = maxRelevantScore(r, f.eaterIds);
-    if (best !== null && best < f.minScore) return false;
+    // the quality bar: every eater at the table who's rated it has to clear
+    // the bar (so the wheel can't land on a place someone dislikes). Unrated
+    // places stay eligible so the wishlist isn't locked out.
+    const worst = minRelevantScore(r, f.eaterIds);
+    if (worst !== null && worst < f.minScore) return false;
   }
   if (f.mode === "takeout" && r.tags.length > 0 && !r.tags.includes("takeout")) {
     // only enforce when the restaurant has been tagged at all
@@ -124,6 +139,11 @@ export function weighCandidate(
   const score = eaterScore(r, f.eaterIds);
   const ratingWeight = (score * score) / 25;
   if (score >= 8) reasons.push("family favorite");
+
+  // Consensus: lean the wheel toward places the table agrees on, away from
+  // the ones half of them can't stand even if the average looks fine.
+  const agreement = eaterAgreement(r, f.eaterIds);
+  if (agreement < 0.8) reasons.push("the table's split on this");
 
   const strength = Math.max(0, Math.min(1, f.recencyStrength / 100));
 
@@ -158,7 +178,7 @@ export function weighCandidate(
     if (worstCuisine && cuisineMult < 0.7) reasons.push(`had ${worstCuisine} recently`);
   }
 
-  return { restaurant: r, weight: ratingWeight * placeMult * cuisineMult, reasons };
+  return { restaurant: r, weight: ratingWeight * agreement * placeMult * cuisineMult, reasons };
 }
 
 /** Normalized key for grouping chain locations (e.g. every "Chick-fil-A"). */

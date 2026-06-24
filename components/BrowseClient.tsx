@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { trackRestaurantAction } from "@/app/actions";
 import { CatalogEntry } from "@/lib/data/adapter";
 import { PRICE_LABELS } from "@/lib/types";
@@ -10,6 +10,7 @@ import { catalogNeighborhoods, neighborhoodOf } from "@/lib/catalogRecommend";
 import { Chip } from "./ui";
 
 const DISTANCE_CHOICES = [0, 3, 5, 10, 25]; // 0 = any
+const PAGE = 60; // how many to reveal at a time (keeps the DOM light)
 
 export function BrowseClient({
   catalog,
@@ -24,6 +25,7 @@ export function BrowseClient({
   const [maxDistance, setMaxDistance] = useState(0);
   const [neighborhood, setNeighborhood] = useState("");
   const [hideTracked, setHideTracked] = useState(true);
+  const [limit, setLimit] = useState(PAGE);
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState<Record<string, "active" | "wishlist">>({});
   const hasHome = home.lat !== null && home.lng !== null;
@@ -51,10 +53,14 @@ export function BrowseClient({
       .sort((a, b) => {
         if (a.dist !== null && b.dist !== null) return a.dist - b.dist;
         return a.c.name.localeCompare(b.c.name);
-      })
-      .slice(0, 300);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog, query, maxDistance, neighborhood, hideTracked, hasHome, home, done]);
+
+  // changing the filters should bring the list back to the top page
+  useEffect(() => {
+    setLimit(PAGE);
+  }, [query, maxDistance, neighborhood, hideTracked]);
 
   const picks = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -164,10 +170,14 @@ export function BrowseClient({
         </select>
       )}
 
-      <p className="text-xs text-muted">{shown.length} shown</p>
+      <p className="text-xs text-muted">
+        {shown.length === 0
+          ? "0 shown"
+          : `Showing ${Math.min(limit, shown.length)} of ${shown.length}`}
+      </p>
 
       <ul className="flex flex-col gap-2">
-        {shown.map(({ c, dist }) => (
+        {shown.slice(0, limit).map(({ c, dist }) => (
           <Row key={c.id} c={c} dist={dist} />
         ))}
         {shown.length === 0 && (
@@ -176,6 +186,15 @@ export function BrowseClient({
           </li>
         )}
       </ul>
+
+      {limit < shown.length && (
+        <button
+          onClick={() => setLimit((n) => n + PAGE)}
+          className="self-center rounded-xl border border-border-soft bg-surface-2 px-4 py-2.5 text-sm font-semibold"
+        >
+          Show more ({shown.length - limit} more)
+        </button>
+      )}
     </div>
   );
 }
