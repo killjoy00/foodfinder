@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   deleteRestaurantAction,
@@ -5,6 +6,7 @@ import {
   updateRestaurantAction,
 } from "@/app/actions";
 import { db } from "@/lib/data";
+import { chainKey } from "@/lib/picker";
 import { PRICE_LABELS, daysSince, mapsLink, openTableLink } from "@/lib/types";
 import { RestaurantForm } from "@/components/RestaurantForm";
 import { RatingRows } from "@/components/RatingRows";
@@ -13,14 +15,19 @@ import { BackLink } from "@/components/BackLink";
 
 export default async function RestaurantPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [restaurant, profiles, visits] = await Promise.all([
+  const [restaurant, profiles, visits, all] = await Promise.all([
     (await db()).getRestaurant(id),
     (await db()).listProfiles(),
     (await db()).listVisitsForRestaurant(id),
+    (await db()).listRestaurants(),
   ]);
   if (!restaurant) notFound();
 
   const days = daysSince(restaurant.lastVisitAt);
+  // other locations of the same brand the family also tracks
+  const siblings = all.filter(
+    (r) => r.id !== restaurant.id && chainKey(r.name) === chainKey(restaurant.name)
+  );
 
   return (
     <div className="flex flex-col gap-5 pt-2">
@@ -35,6 +42,21 @@ export default async function RestaurantPage({ params }: { params: Promise<{ id:
           {days !== null && ` · last visit ${days}d ago`}
           {restaurant.status === "wishlist" && " · ⭐ wishlist"}
         </p>
+        {siblings.length > 0 && (
+          <div className="mt-2 rounded-xl border border-border-soft bg-surface-2 px-3 py-2 text-sm">
+            <span className="text-muted">
+              📍 You track {siblings.length + 1} locations of this place:
+            </span>{" "}
+            {siblings.map((s, i) => (
+              <span key={s.id}>
+                {i > 0 && ", "}
+                <Link href={`/restaurants/${s.id}`} className="text-accent underline">
+                  {s.address?.split(",")[0]?.trim() || s.name}
+                </Link>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2">

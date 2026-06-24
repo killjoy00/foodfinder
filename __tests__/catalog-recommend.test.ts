@@ -77,16 +77,27 @@ describe("recommendFromCatalog", () => {
 });
 
 describe("neighborhoods", () => {
-  it("extracts the neighborhood from an address", () => {
+  it("extracts the neighborhood from a 'Neighborhood, City, State' address", () => {
     expect(neighborhoodOf("Riverside, Austin, TX")).toBe("Riverside");
+    expect(neighborhoodOf("Old West Austin, Austin, TX")).toBe("Old West Austin");
     expect(neighborhoodOf(null)).toBeNull();
   });
-  it("lists unique sorted neighborhoods", () => {
+
+  it("rejects street addresses instead of surfacing them as neighborhoods", () => {
+    expect(neighborhoodOf("6555 Burnet Rd #1, Austin, TX 78757")).toBeNull();
+    expect(neighborhoodOf("1911 W Anderson Ln, Austin, TX")).toBeNull();
+    expect(neighborhoodOf("West Gate Blvd, Austin, TX")).toBeNull();
+  });
+
+  it("lists neighborhoods with at least two places, sorted, ignoring streets", () => {
     const list = catalogNeighborhoods([
       ce({ address: "Riverside, Austin, TX" }),
-      ce({ address: "Mueller, Austin, TX" }),
+      ce({ address: "Mueller, Austin, TX" }), // only one → dropped
       ce({ address: "Riverside, Austin, TX" }),
+      ce({ address: "Hyde Park, Austin, TX" }),
+      ce({ address: "Hyde Park, Austin, TX" }),
+      ce({ address: "1911 W Anderson Ln, Austin, TX" }), // street → ignored
     ]);
-    expect(list).toEqual(["Mueller", "Riverside"]);
+    expect(list).toEqual(["Hyde Park", "Riverside"]);
   });
 });

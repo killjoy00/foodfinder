@@ -71,18 +71,35 @@ export function recommendFromCatalog(
   return picks.slice(0, limit);
 }
 
-/** "Riverside, Austin, TX" → "Riverside". */
+/**
+ * Pull a neighborhood label out of an address. Seed entries are formatted
+ * "Neighborhood, Austin, TX", but many real addresses are
+ * "1911 W Anderson Ln, Austin, TX 78757" — there the first segment is a
+ * street, not a neighborhood, so we reject anything that looks like a street
+ * address rather than surfacing it as a bogus neighborhood.
+ */
+const STREET_SUFFIX =
+  /\s(st|street|ave|avenue|blvd|boulevard|rd|road|ln|lane|dr|drive|hwy|highway|pkwy|parkway|expy|expressway|ste|suite)\.?$/i;
+
 export function neighborhoodOf(address: string | null): string | null {
   if (!address) return null;
   const first = address.split(",")[0]?.trim();
-  return first || null;
+  if (!first) return null;
+  if (/\d/.test(first)) return null; // house/suite numbers ⇒ a street address
+  if (STREET_SUFFIX.test(first)) return null; // ends in a street-type word
+  return first;
 }
 
+const MIN_HOOD_COUNT = 2; // a neighborhood needs a couple places to be a useful filter
+
 export function catalogNeighborhoods(catalog: CatalogEntry[]): string[] {
-  const set = new Set<string>();
+  const counts = new Map<string, number>();
   for (const e of catalog) {
     const hood = neighborhoodOf(e.address);
-    if (hood) set.add(hood);
+    if (hood) counts.set(hood, (counts.get(hood) ?? 0) + 1);
   }
-  return [...set].sort();
+  return [...counts.entries()]
+    .filter(([, n]) => n >= MIN_HOOD_COUNT)
+    .map(([hood]) => hood)
+    .sort();
 }

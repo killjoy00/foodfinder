@@ -5,6 +5,7 @@ import {
   buildCuisineRecency,
   collapseChains,
   eaterScore,
+  locationCounts,
   passesFilters,
   pickTonight,
   pickWeighted,
@@ -268,6 +269,18 @@ describe("sampleCandidates", () => {
     expect(tiny).toHaveLength(2);
     const zeroed = pool.map((c) => ({ ...c, weight: 0 }));
     expect(sampleCandidates(zeroed, 3)).toHaveLength(0);
+  });
+});
+
+describe("locationCounts", () => {
+  it("counts how many tracked places share a brand name", () => {
+    const counts = locationCounts([
+      restaurant({ id: "1", name: "Chick-fil-A" }),
+      restaurant({ id: "2", name: "chick fil a" }), // same brand, different formatting
+      restaurant({ id: "3", name: "Torchy's Tacos" }),
+    ]);
+    expect(counts.get("chickfila")).toBe(2);
+    expect(counts.get("torchystacos")).toBe(1);
   });
 });
 

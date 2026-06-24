@@ -182,8 +182,22 @@ export function weighCandidate(
 }
 
 /** Normalized key for grouping chain locations (e.g. every "Chick-fil-A"). */
-function chainKey(name: string): string {
+export function chainKey(name: string): string {
   return name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
+}
+
+/**
+ * How many of the given restaurants share each brand name, keyed by chainKey.
+ * Lets the UI flag when a family is tracking several locations of one place
+ * (the same grouping the wheel uses when it collapses chains).
+ */
+export function locationCounts(restaurants: RestaurantFull[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const r of restaurants) {
+    const k = chainKey(r.name);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /**

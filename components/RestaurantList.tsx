@@ -7,6 +7,7 @@ import { clearWishlistAction, logVisitAction, setStatusAction } from "@/app/acti
 import { PRICE_LABELS, RestaurantFull, daysSince } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
 import { ratingStats } from "@/lib/ratings";
+import { chainKey, locationCounts } from "@/lib/picker";
 import { Chip } from "./ui";
 
 const MapView = dynamic(() => import("./MapView"), {
@@ -36,6 +37,9 @@ export function RestaurantList({
   const [confirmClear, setConfirmClear] = useState(false);
   const hasHome = home.lat !== null && home.lng !== null;
   const wishlistCount = restaurants.filter((r) => r.status === "wishlist").length;
+  // count locations per brand across everything tracked, so a family that
+  // tracks three Torchy's sees "📍 3 locations" on each of them
+  const locCounts = useMemo(() => locationCounts(restaurants), [restaurants]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -164,13 +168,21 @@ export function RestaurantList({
           const days = daysSince(r.lastVisitAt);
           const stats = ratingStats(r.ratings);
           const dist = hasHome ? formatMiles(distanceMiles(home, r)) : null;
+          const locs = locCounts.get(chainKey(r.name)) ?? 1;
           return (
             <li
               key={r.id}
               className="flex items-center gap-3 rounded-2xl border border-border-soft bg-surface p-3"
             >
               <Link href={`/restaurants/${r.id}`} className="min-w-0 flex-1">
-                <p className="truncate font-bold">{r.name}</p>
+                <p className="flex items-center gap-1.5 truncate font-bold">
+                  <span className="truncate">{r.name}</span>
+                  {locs > 1 && (
+                    <span className="shrink-0 rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted">
+                      📍 {locs} locations
+                    </span>
+                  )}
+                </p>
                 <p className="truncate text-sm text-muted">
                   {r.cuisines.join(" · ") || "uncategorized"} · {PRICE_LABELS[r.price - 1]}
                   {stats.count > 0 && ` · ★ ${stats.mean.toFixed(1)} (${stats.count})`}
