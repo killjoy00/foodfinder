@@ -383,15 +383,33 @@ export class SupabaseAdapter implements DataAdapter {
     }
   }
 
-  async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
-    const [catalog, links] = await Promise.all([
-      unwrap(
+  /**
+   * PostgREST caps a single response at ~1000 rows regardless of .limit(),
+   * so the shared catalog (thousands of rows) has to be paged with .range().
+   * Ordering by (name, id) keeps pagination stable across pages.
+   */
+  private async fetchAllCatalogRows(): Promise<Row[]> {
+    const PAGE = 1000;
+    const out: Row[] = [];
+    for (let from = 0; ; from += PAGE) {
+      const rows = await unwrap(
         this.client
           .from("restaurants")
           .select("id, name, cuisines, price, address, lat, lng, maps_url")
           .order("name", { ascending: true })
-          .limit(5000)
-      ),
+          .order("id", { ascending: true })
+          .range(from, from + PAGE - 1)
+      );
+      const batch = (rows ?? []) as Row[];
+      out.push(...batch);
+      if (batch.length < PAGE) break;
+    }
+    return out;
+  }
+
+  async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
+    const [catalog, links] = await Promise.all([
+      this.fetchAllCatalogRows(),
       unwrap(
         this.client
           .from("group_restaurants")
@@ -400,7 +418,7 @@ export class SupabaseAdapter implements DataAdapter {
       ),
     ]);
     const linkByR = new Map((links ?? []).map((l: Row) => [l.restaurant_id, l.status]));
-    return (catalog ?? []).map((c: Row) => ({
+    return catalog.map((c: Row) => ({
       id: c.id,
       name: c.name,
       cuisines: c.cuisines ?? [],
