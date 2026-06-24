@@ -252,6 +252,7 @@ export function collapseChains(
     const lastVisitAt =
       locs.map((l) => l.lastVisitAt).filter((d): d is string => !!d).sort().pop() ?? null;
 
+    const locations = locs.flatMap((l) => l.locations);
     out.push({
       ...rep,
       ratings,
@@ -259,7 +260,8 @@ export function collapseChains(
       visitCount: locs.reduce((a, l) => a + l.visitCount, 0),
       status: locs.some((l) => l.status === "active") ? "active" : "wishlist",
       cuisines: [...new Set(locs.flatMap((l) => l.cuisines))],
-      chainCount: locs.length,
+      locations,
+      locationCount: locations.length,
     });
   }
   return out;

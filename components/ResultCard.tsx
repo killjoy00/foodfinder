@@ -47,9 +47,9 @@ export function ResultCard({
               ? " · first time! 🎈"
               : ""}
         </p>
-        {r.chainCount && r.chainCount > 1 && (
+        {r.locationCount > 1 && (
           <p className="mt-1 text-sm text-orange-200">
-            📍 Nearest of {r.chainCount} locations{r.address ? ` · ${r.address}` : ""}
+            📍 Nearest of {r.locationCount} locations{r.address ? ` · ${r.address}` : ""}
           </p>
         )}
       </div>

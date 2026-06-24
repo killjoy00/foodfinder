@@ -6,6 +6,7 @@ import {
   Profile,
   Restaurant,
   RestaurantFull,
+  RestaurantLocation,
   Settings,
   Visit,
   VisitMode,
@@ -18,6 +19,22 @@ import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewResta
 type Row = Record<string, any>;
 
 type Catalog = Omit<Restaurant, "status" | "notes">;
+
+function catalogToLocation(c: Catalog): RestaurantLocation {
+  return {
+    id: c.id,
+    name: c.name,
+    address: c.address,
+    lat: c.lat,
+    lng: c.lng,
+    googlePlaceId: c.googlePlaceId,
+    mapsUrl: c.mapsUrl,
+    reserveUrl: c.reserveUrl,
+    price: c.price,
+    cuisines: c.cuisines,
+    tags: c.tags,
+  };
+}
 
 function rowToCatalog(row: Row): Catalog {
   return {
@@ -271,14 +288,17 @@ export class SupabaseAdapter implements DataAdapter {
     for (const link of links) {
       const c = catalogById.get(link.restaurant_id);
       if (!c) continue;
+      const cuisines = overrides[link.restaurant_id] ?? c.cuisines;
       out.push({
         ...c,
-        cuisines: overrides[link.restaurant_id] ?? c.cuisines,
+        cuisines,
         status: link.status,
         notes: link.notes,
         ratings: ratingsByR.get(link.restaurant_id) ?? {},
         lastVisitAt: lastVisit.get(link.restaurant_id) ?? null,
         visitCount: visitCount.get(link.restaurant_id) ?? 0,
+        locations: [catalogToLocation({ ...c, cuisines })],
+        locationCount: 1,
       });
     }
     return out;

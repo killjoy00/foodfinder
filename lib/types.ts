@@ -83,12 +83,38 @@ export type Restaurant = {
   createdAt: string;
 };
 
-/** Restaurant enriched with rating + visit aggregates for display and picking. */
+/**
+ * One physical location under a brand. The family tracks brands, but each
+ * brand can hold several catalog locations (every Chick-fil-A you've added),
+ * and distance/maps work off whichever location is relevant.
+ */
+export type RestaurantLocation = {
+  id: string; // catalog restaurant id
+  name: string;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  googlePlaceId: string | null;
+  mapsUrl: string | null;
+  reserveUrl: string | null;
+  price: number;
+  cuisines: string[];
+  tags: string[];
+};
+
+/**
+ * A brand the family tracks, enriched with rating + visit aggregates for
+ * display and picking. `id` is the brand id; ratings and visits are
+ * brand-wide (pooled across the brand's locations). It keeps the
+ * Restaurant shape so the wheel/vote/list can treat a brand like a place,
+ * with `locations` carrying the per-branch detail.
+ */
 export type RestaurantFull = Restaurant & {
   ratings: Record<string, number>; // profileId -> 1-10
   lastVisitAt: string | null;
   visitCount: number;
-  chainCount?: number; // >1 when this entry represents several collapsed chain locations
+  locations: RestaurantLocation[]; // every branch under this brand (>= 1)
+  locationCount: number; // locations.length, surfaced for convenience
 };
 
 export type VisitMode = "dine_in" | "takeout";
