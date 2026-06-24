@@ -14,6 +14,7 @@ import {
   VoteSession,
 } from "../types";
 import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewRestaurant } from "./adapter";
+import { brandKey, buildBrand } from "../brand";
 
 type CatalogRestaurant = Omit<Restaurant, "status" | "notes">;
 
@@ -33,11 +34,20 @@ function catalogToLocation(c: CatalogRestaurant): RestaurantLocation {
   };
 }
 type HouseholdRow = { id: string; name: string; nameKey: string; passwordHash: string };
+type BrandRow = {
+  id: string;
+  householdId: string;
+  brandKey: string;
+  name: string;
+  status: "active" | "wishlist";
+  notes: string | null;
+  createdAt: string;
+};
+// links a catalog location to the brand the family files it under
 type GroupRestaurant = {
   householdId: string;
   restaurantId: string;
-  status: "active" | "wishlist";
-  notes: string | null;
+  brandId: string;
   createdAt: string;
 };
 
@@ -45,8 +55,10 @@ type Store = {
   households: HouseholdRow[];
   profiles: (Profile & { householdId: string })[];
   restaurants: CatalogRestaurant[];
+  brands: BrandRow[];
   groupRestaurants: GroupRestaurant[];
-  ratings: { restaurantId: string; profileId: string; score: number }[];
+  ratings: { brandId: string; profileId: string; score: number }[];
+  // visits are brand-level; Visit.restaurantId holds the brand id
   visits: (Visit & { householdId: string })[];
   voteSessions: (VoteSession & { householdId: string })[];
   votes: Vote[];
@@ -107,50 +119,63 @@ function seedStore(): Store {
     mk("r11", "Smoke & Oak BBQ", ["BBQ", "American"], 3, ["patio"]),
   ];
 
-  const gr = (restaurantId: string, status: "active" | "wishlist"): GroupRestaurant => ({
-    householdId: DEMO_HID,
-    restaurantId,
-    status,
-    notes: null,
-    createdAt: daysAgo(200),
-  });
-  const groupRestaurants: GroupRestaurant[] = [
-    ...["r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9"].map((id) => gr(id, "active")),
-    gr("r10", "wishlist"),
-    gr("r11", "wishlist"),
+  // each demo restaurant is its own brand (no chains in the sample data)
+  const trackList: [string, "active" | "wishlist"][] = [
+    ["r1", "active"], ["r2", "active"], ["r3", "active"], ["r4", "active"],
+    ["r5", "active"], ["r6", "active"], ["r7", "active"], ["r8", "active"],
+    ["r9", "active"], ["r10", "wishlist"], ["r11", "wishlist"],
   ];
+  const brands: BrandRow[] = [];
+  const groupRestaurants: GroupRestaurant[] = [];
+  const brandIdOf: Record<string, string> = {};
+  for (const [rid, status] of trackList) {
+    const cat = restaurants.find((r) => r.id === rid)!;
+    const id = `brand-${rid}`;
+    brandIdOf[rid] = id;
+    brands.push({
+      id,
+      householdId: DEMO_HID,
+      brandKey: brandKey(cat.name),
+      name: cat.name,
+      status,
+      notes: null,
+      createdAt: daysAgo(200),
+    });
+    groupRestaurants.push({ householdId: DEMO_HID, restaurantId: rid, brandId: id, createdAt: daysAgo(200) });
+  }
 
-  const ratings = [
-    { restaurantId: "r1", profileId: "p1", score: 8 },
-    { restaurantId: "r1", profileId: "p2", score: 9 },
-    { restaurantId: "r1", profileId: "p3", score: 10 },
-    { restaurantId: "r1", profileId: "p4", score: 7 },
-    { restaurantId: "r2", profileId: "p1", score: 9 },
-    { restaurantId: "r2", profileId: "p2", score: 7 },
-    { restaurantId: "r2", profileId: "p3", score: 6 },
-    { restaurantId: "r3", profileId: "p1", score: 6 },
-    { restaurantId: "r3", profileId: "p2", score: 7 },
-    { restaurantId: "r3", profileId: "p3", score: 8 },
-    { restaurantId: "r3", profileId: "p4", score: 9 },
-    { restaurantId: "r4", profileId: "p1", score: 9 },
-    { restaurantId: "r4", profileId: "p2", score: 8 },
-    { restaurantId: "r5", profileId: "p3", score: 10 },
-    { restaurantId: "r5", profileId: "p4", score: 10 },
-    { restaurantId: "r5", profileId: "p1", score: 5 },
-    { restaurantId: "r6", profileId: "p1", score: 8 },
-    { restaurantId: "r6", profileId: "p2", score: 8 },
-    { restaurantId: "r7", profileId: "p1", score: 10 },
-    { restaurantId: "r7", profileId: "p2", score: 9 },
-    { restaurantId: "r8", profileId: "p2", score: 9 },
-    { restaurantId: "r8", profileId: "p1", score: 7 },
-    { restaurantId: "r9", profileId: "p3", score: 8 },
-    { restaurantId: "r9", profileId: "p4", score: 8 },
+  const rawRatings = [
+    { rid: "r1", profileId: "p1", score: 8 },
+    { rid: "r1", profileId: "p2", score: 9 },
+    { rid: "r1", profileId: "p3", score: 10 },
+    { rid: "r1", profileId: "p4", score: 7 },
+    { rid: "r2", profileId: "p1", score: 9 },
+    { rid: "r2", profileId: "p2", score: 7 },
+    { rid: "r2", profileId: "p3", score: 6 },
+    { rid: "r3", profileId: "p1", score: 6 },
+    { rid: "r3", profileId: "p2", score: 7 },
+    { rid: "r3", profileId: "p3", score: 8 },
+    { rid: "r3", profileId: "p4", score: 9 },
+    { rid: "r4", profileId: "p1", score: 9 },
+    { rid: "r4", profileId: "p2", score: 8 },
+    { rid: "r5", profileId: "p3", score: 10 },
+    { rid: "r5", profileId: "p4", score: 10 },
+    { rid: "r5", profileId: "p1", score: 5 },
+    { rid: "r6", profileId: "p1", score: 8 },
+    { rid: "r6", profileId: "p2", score: 8 },
+    { rid: "r7", profileId: "p1", score: 10 },
+    { rid: "r7", profileId: "p2", score: 9 },
+    { rid: "r8", profileId: "p2", score: 9 },
+    { rid: "r8", profileId: "p1", score: 7 },
+    { rid: "r9", profileId: "p3", score: 8 },
+    { rid: "r9", profileId: "p4", score: 8 },
   ];
+  const ratings = rawRatings.map((x) => ({ brandId: brandIdOf[x.rid], profileId: x.profileId, score: x.score }));
 
-  const mkVisit = (id: string, restaurantId: string, ago: number, mode: VisitMode = "dine_in") => ({
+  const mkVisit = (id: string, rid: string, ago: number, mode: VisitMode = "dine_in") => ({
     id,
     householdId: DEMO_HID,
-    restaurantId,
+    restaurantId: brandIdOf[rid], // brand-level
     date: daysAgo(ago),
     mode,
     note: null,
@@ -171,6 +196,7 @@ function seedStore(): Store {
     households,
     profiles,
     restaurants,
+    brands,
     groupRestaurants,
     ratings,
     visits,
@@ -240,28 +266,42 @@ export class MemoryRegistry implements HouseholdRegistry {
 export class MemoryAdapter implements DataAdapter {
   constructor(private hid: string) {}
 
-  private enrich(c: CatalogRestaurant, link: GroupRestaurant): RestaurantFull {
+  private homeOrigin(): { lat: number | null; lng: number | null } | null {
+    const v = store().settings.find((x) => x.householdId === this.hid)?.value;
+    if (!v || v.homeLat === null || v.homeLng === null) return null;
+    return { lat: v.homeLat, lng: v.homeLng };
+  }
+
+  private enrichBrand(brand: BrandRow): RestaurantFull {
     const s = store();
-    const ratings: Record<string, number> = {};
     const memberIds = new Set(s.profiles.filter((p) => p.householdId === this.hid).map((p) => p.id));
+    const catById = new Map(s.restaurants.map((r) => [r.id, r]));
+    const override = s.settings.find((x) => x.householdId === this.hid)?.value.cuisineOverrides?.[brand.id];
+    const locations = s.groupRestaurants
+      .filter((g) => g.householdId === this.hid && g.brandId === brand.id)
+      .map((g) => catById.get(g.restaurantId))
+      .filter((c): c is CatalogRestaurant => !!c)
+      .map(catalogToLocation);
+    const ratings: Record<string, number> = {};
     for (const r of s.ratings) {
-      if (r.restaurantId === c.id && memberIds.has(r.profileId)) ratings[r.profileId] = r.score;
+      if (r.brandId === brand.id && memberIds.has(r.profileId)) ratings[r.profileId] = r.score;
     }
     const visits = s.visits
-      .filter((v) => v.restaurantId === c.id && v.householdId === this.hid)
+      .filter((v) => v.restaurantId === brand.id && v.householdId === this.hid)
       .sort((a, b) => b.date.localeCompare(a.date));
-    const override = s.settings.find((x) => x.householdId === this.hid)?.value.cuisineOverrides?.[c.id];
-    return {
-      ...c,
-      cuisines: override ?? c.cuisines,
-      status: link.status,
-      notes: link.notes,
+    return buildBrand({
+      id: brand.id,
+      name: brand.name,
+      status: brand.status,
+      notes: brand.notes,
+      createdAt: brand.createdAt,
+      locations,
       ratings,
       lastVisitAt: visits[0]?.date ?? null,
       visitCount: visits.length,
-      locations: [catalogToLocation({ ...c, cuisines: override ?? c.cuisines })],
-      locationCount: 1,
-    };
+      home: this.homeOrigin(),
+      cuisineOverride: override ?? null,
+    });
   }
 
   async listProfiles(): Promise<Profile[]> {
@@ -292,36 +332,47 @@ export class MemoryAdapter implements DataAdapter {
     s.ratings = s.ratings.filter((r) => r.profileId !== id);
   }
 
-  private myLinks(): GroupRestaurant[] {
-    return store().groupRestaurants.filter((g) => g.householdId === this.hid);
+  private myBrands(): BrandRow[] {
+    return store().brands.filter((b) => b.householdId === this.hid);
   }
 
   async listRestaurants(): Promise<RestaurantFull[]> {
-    const s = store();
-    const byId = new Map(s.restaurants.map((r) => [r.id, r]));
-    return this.myLinks()
-      .map((link) => {
-        const c = byId.get(link.restaurantId);
-        return c ? this.enrich(c, link) : null;
-      })
-      .filter((r): r is RestaurantFull => r !== null);
+    return this.myBrands().map((b) => this.enrichBrand(b));
   }
 
   async getRestaurant(id: string): Promise<RestaurantFull | null> {
-    const link = this.myLinks().find((g) => g.restaurantId === id);
-    const c = store().restaurants.find((r) => r.id === id);
-    return link && c ? this.enrich(c, link) : null;
+    const brand = this.myBrands().find((b) => b.id === id);
+    return brand ? this.enrichBrand(brand) : null;
   }
 
-  /** Find an existing catalog row to reuse, or null. */
+  /**
+   * Reuse a catalog row only when it's the same Google place. We deliberately
+   * do NOT dedup by name: two same-named places are distinct locations (the
+   * family's brand groups them), and different-city namesakes stay separate.
+   */
   private findCatalog(data: NewRestaurant): CatalogRestaurant | null {
+    if (!data.googlePlaceId) return null;
+    return store().restaurants.find((r) => r.googlePlaceId === data.googlePlaceId) ?? null;
+  }
+
+  /** The brand for this name (matched by brand key), creating one if needed. */
+  private ensureBrand(name: string, status: "active" | "wishlist", notes: string | null): BrandRow {
     const s = store();
-    if (data.googlePlaceId) {
-      const byPid = s.restaurants.find((r) => r.googlePlaceId === data.googlePlaceId);
-      if (byPid) return byPid;
+    const key = brandKey(name);
+    let brand = s.brands.find((b) => b.householdId === this.hid && b.brandKey === key);
+    if (!brand) {
+      brand = {
+        id: randomUUID(),
+        householdId: this.hid,
+        brandKey: key,
+        name,
+        status,
+        notes,
+        createdAt: new Date().toISOString(),
+      };
+      s.brands.push(brand);
     }
-    const key = data.name.trim().toLowerCase();
-    return s.restaurants.find((r) => r.name.trim().toLowerCase() === key) ?? null;
+    return brand;
   }
 
   async createRestaurant(data: NewRestaurant): Promise<Restaurant> {
@@ -344,67 +395,67 @@ export class MemoryAdapter implements DataAdapter {
       };
       s.restaurants.push(catalog);
     }
-    const existing = s.groupRestaurants.find(
-      (g) => g.householdId === this.hid && g.restaurantId === catalog!.id
-    );
-    if (existing) {
-      existing.status = data.status;
-      if (data.notes) existing.notes = data.notes;
-    } else {
+    const brand = this.ensureBrand(data.name, data.status, data.notes);
+    brand.status = data.status;
+    if (data.notes) brand.notes = data.notes;
+    if (!s.groupRestaurants.some((g) => g.householdId === this.hid && g.restaurantId === catalog!.id)) {
       s.groupRestaurants.push({
         householdId: this.hid,
         restaurantId: catalog.id,
-        status: data.status,
-        notes: data.notes,
+        brandId: brand.id,
         createdAt: new Date().toISOString(),
       });
     }
-    return { ...catalog, status: data.status, notes: data.notes };
+    // id is the brand id so callers land on the brand entry
+    return { ...catalog, id: brand.id, status: brand.status, notes: brand.notes };
   }
 
   async updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void> {
     const s = store();
-    const catalog = s.restaurants.find((r) => r.id === id);
-    if (catalog) {
-      for (const k of [
-        "name",
-        "cuisines",
-        "price",
-        "address",
-        "lat",
-        "lng",
-        "googlePlaceId",
-        "mapsUrl",
-        "reserveUrl",
-        "tags",
-      ] as const) {
-        if (data[k] !== undefined) (catalog as Record<string, unknown>)[k] = data[k];
-      }
+    const brand = s.brands.find((b) => b.id === id && b.householdId === this.hid);
+    if (!brand) return;
+    if (data.name !== undefined) brand.name = data.name;
+    if (data.status !== undefined) brand.status = data.status;
+    if (data.notes !== undefined) brand.notes = data.notes;
+    if (data.cuisines !== undefined) {
+      const row = s.settings.find((x) => x.householdId === this.hid);
+      const value = row?.value ?? { ...DEFAULT_SETTINGS };
+      value.cuisineOverrides = { ...(value.cuisineOverrides ?? {}), [id]: data.cuisines };
+      if (row) row.value = value;
+      else s.settings.push({ householdId: this.hid, value });
     }
-    const link = s.groupRestaurants.find(
-      (g) => g.householdId === this.hid && g.restaurantId === id
-    );
-    if (link) {
-      if (data.status !== undefined) link.status = data.status;
-      if (data.notes !== undefined) link.notes = data.notes;
+    // catalog facts only make sense to edit when the brand is a single location
+    const links = s.groupRestaurants.filter((g) => g.householdId === this.hid && g.brandId === id);
+    if (links.length === 1) {
+      const catalog = s.restaurants.find((r) => r.id === links[0].restaurantId);
+      if (catalog) {
+        if (data.name !== undefined) catalog.name = data.name;
+        for (const k of ["price", "address", "lat", "lng", "googlePlaceId", "mapsUrl", "reserveUrl", "tags"] as const) {
+          if (data[k] !== undefined) (catalog as Record<string, unknown>)[k] = data[k];
+        }
+      }
     }
   }
 
   async deleteRestaurant(id: string): Promise<void> {
     const s = store();
     s.groupRestaurants = s.groupRestaurants.filter(
-      (g) => !(g.householdId === this.hid && g.restaurantId === id)
+      (g) => !(g.householdId === this.hid && g.brandId === id)
     );
     s.visits = s.visits.filter((v) => !(v.restaurantId === id && v.householdId === this.hid));
     const memberIds = new Set(s.profiles.filter((p) => p.householdId === this.hid).map((p) => p.id));
-    s.ratings = s.ratings.filter((r) => !(r.restaurantId === id && memberIds.has(r.profileId)));
+    s.ratings = s.ratings.filter((r) => !(r.brandId === id && memberIds.has(r.profileId)));
+    s.brands = s.brands.filter((b) => !(b.id === id && b.householdId === this.hid));
   }
 
   async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
     const s = store();
-    const linkByR = new Map(
-      s.groupRestaurants.filter((g) => g.householdId === this.hid).map((g) => [g.restaurantId, g.status])
-    );
+    const brandStatus = new Map(s.brands.filter((b) => b.householdId === this.hid).map((b) => [b.id, b.status]));
+    const statusByR = new Map<string, "active" | "wishlist">();
+    for (const g of s.groupRestaurants.filter((g) => g.householdId === this.hid)) {
+      const st = brandStatus.get(g.brandId);
+      if (st) statusByR.set(g.restaurantId, st);
+    }
     return s.restaurants.map((c) => ({
       id: c.id,
       name: c.name,
@@ -414,9 +465,22 @@ export class MemoryAdapter implements DataAdapter {
       lat: c.lat,
       lng: c.lng,
       mapsUrl: c.mapsUrl,
-      tracked: linkByR.has(c.id),
-      trackedStatus: linkByR.get(c.id) ?? null,
+      tracked: statusByR.has(c.id),
+      trackedStatus: statusByR.get(c.id) ?? null,
     }));
+  }
+
+  async getCatalogLocation(restaurantId: string): Promise<RestaurantLocation | null> {
+    const c = store().restaurants.find((r) => r.id === restaurantId);
+    return c ? catalogToLocation(c) : null;
+  }
+
+  async setLocationCoords(restaurantId: string, lat: number, lng: number): Promise<void> {
+    const c = store().restaurants.find((r) => r.id === restaurantId);
+    if (c) {
+      c.lat = lat;
+      c.lng = lng;
+    }
   }
 
   async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
@@ -448,103 +512,103 @@ export class MemoryAdapter implements DataAdapter {
     return added;
   }
 
-  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
+  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<string> {
     const s = store();
-    const existing = s.groupRestaurants.find(
-      (g) => g.householdId === this.hid && g.restaurantId === restaurantId
-    );
-    if (existing) existing.status = status;
-    else
+    const catalog = s.restaurants.find((r) => r.id === restaurantId);
+    if (!catalog) return "";
+    const brand = this.ensureBrand(catalog.name, status, null);
+    brand.status = status;
+    if (!s.groupRestaurants.some((g) => g.householdId === this.hid && g.restaurantId === restaurantId)) {
       s.groupRestaurants.push({
         householdId: this.hid,
         restaurantId,
-        status,
-        notes: null,
+        brandId: brand.id,
         createdAt: new Date().toISOString(),
       });
+    }
+    return brand.id;
   }
 
   async clearWishlist(): Promise<number> {
     const s = store();
-    const ids = new Set(
-      s.groupRestaurants
-        .filter((g) => g.householdId === this.hid && g.status === "wishlist")
-        .map((g) => g.restaurantId)
+    const brandIds = new Set(
+      s.brands.filter((b) => b.householdId === this.hid && b.status === "wishlist").map((b) => b.id)
     );
-    if (ids.size === 0) return 0;
+    if (brandIds.size === 0) return 0;
     s.groupRestaurants = s.groupRestaurants.filter(
-      (g) => !(g.householdId === this.hid && g.status === "wishlist")
+      (g) => !(g.householdId === this.hid && brandIds.has(g.brandId))
     );
-    s.visits = s.visits.filter((v) => !(v.householdId === this.hid && ids.has(v.restaurantId)));
+    s.visits = s.visits.filter((v) => !(v.householdId === this.hid && brandIds.has(v.restaurantId)));
     const memberIds = new Set(s.profiles.filter((p) => p.householdId === this.hid).map((p) => p.id));
-    s.ratings = s.ratings.filter((r) => !(ids.has(r.restaurantId) && memberIds.has(r.profileId)));
-    return ids.size;
+    s.ratings = s.ratings.filter((r) => !(brandIds.has(r.brandId) && memberIds.has(r.profileId)));
+    s.brands = s.brands.filter((b) => !(b.householdId === this.hid && brandIds.has(b.id)));
+    return brandIds.size;
   }
 
+  /** Merge two of this household's brands; ratings keep the highest per person. */
   async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
     const s = store();
     if (survivorId === loserId) return;
-    const survivor = s.restaurants.find((r) => r.id === survivorId);
-    const loser = s.restaurants.find((r) => r.id === loserId);
+    const survivor = s.brands.find((b) => b.id === survivorId && b.householdId === this.hid);
+    const loser = s.brands.find((b) => b.id === loserId && b.householdId === this.hid);
     if (!survivor || !loser) return;
 
-    survivor.cuisines = [...new Set([...survivor.cuisines, ...loser.cuisines])];
-    survivor.tags = [...new Set([...survivor.tags, ...loser.tags])];
-    survivor.address ??= loser.address;
-    survivor.lat ??= loser.lat;
-    survivor.lng ??= loser.lng;
-    survivor.googlePlaceId ??= loser.googlePlaceId;
-    survivor.mapsUrl ??= loser.mapsUrl;
-    survivor.reserveUrl ??= loser.reserveUrl;
-
-    // repoint group links (one per household; merge status/notes keeping survivor's)
-    for (const link of s.groupRestaurants.filter((g) => g.restaurantId === loserId)) {
-      const surv = s.groupRestaurants.find(
-        (g) => g.householdId === link.householdId && g.restaurantId === survivorId
-      );
-      if (surv) {
-        if (link.status === "active") surv.status = "active";
-        surv.notes ??= link.notes;
-      } else {
-        link.restaurantId = survivorId;
-      }
+    for (const g of s.groupRestaurants) {
+      if (g.householdId === this.hid && g.brandId === loserId) g.brandId = survivorId;
     }
-    s.groupRestaurants = s.groupRestaurants.filter((g) => g.restaurantId !== loserId);
-
+    for (const lr of s.ratings.filter((r) => r.brandId === loserId)) {
+      const sr = s.ratings.find((r) => r.brandId === survivorId && r.profileId === lr.profileId);
+      if (sr) sr.score = Math.max(sr.score, lr.score);
+      else s.ratings.push({ brandId: survivorId, profileId: lr.profileId, score: lr.score });
+    }
+    s.ratings = s.ratings.filter((r) => r.brandId !== loserId);
     for (const v of s.visits) if (v.restaurantId === loserId) v.restaurantId = survivorId;
-
-    for (const rating of s.ratings.filter((r) => r.restaurantId === loserId)) {
-      const exists = s.ratings.some(
-        (x) => x.restaurantId === survivorId && x.profileId === rating.profileId
-      );
-      if (!exists) rating.restaurantId = survivorId;
-    }
-    s.ratings = s.ratings.filter((r) => r.restaurantId !== loserId);
-    s.restaurants = s.restaurants.filter((r) => r.id !== loserId);
+    if (survivor.status !== "active" && loser.status === "active") survivor.status = "active";
+    survivor.notes ??= loser.notes;
+    s.brands = s.brands.filter((b) => b.id !== loserId);
   }
 
-  async setRating(restaurantId: string, profileId: string, score: number): Promise<void> {
+  /** Move one location out of a brand into its own new brand. */
+  async splitLocation(brandId: string, restaurantId: string): Promise<string> {
+    const s = store();
+    const link = s.groupRestaurants.find(
+      (g) => g.householdId === this.hid && g.brandId === brandId && g.restaurantId === restaurantId
+    );
+    const parent = s.brands.find((b) => b.id === brandId && b.householdId === this.hid);
+    const catalog = s.restaurants.find((r) => r.id === restaurantId);
+    if (!link || !parent || !catalog) return brandId;
+    const newBrand: BrandRow = {
+      id: randomUUID(),
+      householdId: this.hid,
+      brandKey: brandKey(catalog.name),
+      name: catalog.name,
+      status: parent.status,
+      notes: null,
+      createdAt: new Date().toISOString(),
+    };
+    s.brands.push(newBrand);
+    link.brandId = newBrand.id;
+    return newBrand.id;
+  }
+
+  async setRating(brandId: string, profileId: string, score: number): Promise<void> {
     const s = store();
     const member = s.profiles.some((p) => p.id === profileId && p.householdId === this.hid);
     if (!member) return;
-    const existing = s.ratings.find(
-      (r) => r.restaurantId === restaurantId && r.profileId === profileId
-    );
+    const existing = s.ratings.find((r) => r.brandId === brandId && r.profileId === profileId);
     if (existing) existing.score = score;
-    else s.ratings.push({ restaurantId, profileId, score });
+    else s.ratings.push({ brandId, profileId, score });
   }
 
-  async clearRating(restaurantId: string, profileId: string): Promise<void> {
+  async clearRating(brandId: string, profileId: string): Promise<void> {
     const s = store();
     const member = s.profiles.some((p) => p.id === profileId && p.householdId === this.hid);
     if (!member) return;
-    s.ratings = s.ratings.filter(
-      (r) => !(r.restaurantId === restaurantId && r.profileId === profileId)
-    );
+    s.ratings = s.ratings.filter((r) => !(r.brandId === brandId && r.profileId === profileId));
   }
 
-  async addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
-    store().visits.push({ id: randomUUID(), householdId: this.hid, restaurantId, date, mode, note });
+  async addVisit(brandId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
+    store().visits.push({ id: randomUUID(), householdId: this.hid, restaurantId: brandId, date, mode, note });
   }
 
   async listRecentVisits(limit: number): Promise<Visit[]> {

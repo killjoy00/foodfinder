@@ -124,8 +124,8 @@ describe("MemoryAdapter master catalog", () => {
 
     // tracking one adds it to B's list without affecting A
     const target = catalogB[0];
-    await b.trackRestaurant(target.id, "wishlist");
-    expect((await b.listRestaurants()).some((r) => r.id === target.id)).toBe(true);
+    const brandId = await b.trackRestaurant(target.id, "wishlist");
+    expect((await b.listRestaurants()).some((r) => r.id === brandId)).toBe(true);
     const flagged = (await b.listCatalog()).find((c) => c.id === target.id);
     expect(flagged?.tracked).toBe(true);
     expect(flagged?.trackedStatus).toBe("wishlist");
@@ -146,14 +146,15 @@ describe("per-family cuisine overrides", () => {
     const b = new MemoryAdapter(other.id);
 
     const made = await a.createRestaurant(newRestaurant({ name: "Shared Spot", cuisines: ["American"] }));
-    await b.trackRestaurant(made.id, "active");
+    const loc = (await a.listCatalog()).find((c) => c.name === "Shared Spot")!;
+    await b.trackRestaurant(loc.id, "active"); // B tracks the shared catalog location
 
-    // group A overrides the cuisine for itself
+    // group A overrides the cuisine for its own brand
     const settings = await a.getSettings();
     await a.saveSettings({ ...settings, cuisineOverrides: { [made.id]: ["BBQ", "Tacos"] } });
 
     const inA = (await a.listRestaurants()).find((r) => r.id === made.id);
-    const inB = (await b.listRestaurants()).find((r) => r.id === made.id);
+    const inB = (await b.listRestaurants()).find((r) => r.name === "Shared Spot");
     expect(inA?.cuisines).toEqual(["BBQ", "Tacos"]); // A sees its override
     expect(inB?.cuisines).toEqual(["American"]); // B still sees the catalog value
   });
@@ -188,12 +189,69 @@ describe("multi-group isolation", () => {
     const rb = await b.createRestaurant(
       newRestaurant({ name: "Shared Spot", googlePlaceId: "PIDX", status: "wishlist" })
     );
-    expect(rb.id).toBe(ra.id); // deduped to the same catalog entry
+    // each household gets its own brand, but they share one catalog row
+    const catA = (await a.listCatalog()).find((c) => c.name === "Shared Spot");
+    const catB = (await b.listCatalog()).find((c) => c.name === "Shared Spot");
+    expect(catA?.id).toBe(catB?.id); // deduped to the same catalog entry
 
-    // but each group tracks it with its own status
+    // and each group tracks it with its own status
     const inA = (await a.listRestaurants()).find((r) => r.id === ra.id);
-    const inB = (await b.listRestaurants()).find((r) => r.id === ra.id);
+    const inB = (await b.listRestaurants()).find((r) => r.id === rb.id);
     expect(inA?.status).toBe("active");
     expect(inB?.status).toBe("wishlist");
+  });
+});
+
+describe("brand grouping", () => {
+  beforeEach(freshStore);
+
+  it("groups same-named locations into one brand entry", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam", "h");
+    const db = new MemoryAdapter(other.id);
+    const p = await db.createProfile("Kid", "🦊", "#fff");
+
+    const b1 = await db.createRestaurant(newRestaurant({ name: "Chick-fil-A", googlePlaceId: "L1", cuisines: ["Fast Food"] }));
+    const b2 = await db.createRestaurant(newRestaurant({ name: "Chick-fil-A", googlePlaceId: "L2" }));
+    expect(b2.id).toBe(b1.id); // both locations land on the same brand
+
+    const cfa = (await db.listRestaurants()).filter((r) => r.name === "Chick-fil-A");
+    expect(cfa).toHaveLength(1);
+    expect(cfa[0].locationCount).toBe(2);
+
+    // ratings are brand-wide
+    await db.setRating(cfa[0].id, p.id, 8);
+    const after = (await db.listRestaurants()).find((r) => r.id === cfa[0].id)!;
+    expect(after.ratings[p.id]).toBe(8);
+  });
+
+  it("merging two brands keeps the highest rating per person and pools locations", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam2", "h");
+    const db = new MemoryAdapter(other.id);
+    const p = await db.createProfile("Kid", "🦊", "#fff");
+    const a = await db.createRestaurant(newRestaurant({ name: "Pizza One" }));
+    const b = await db.createRestaurant(newRestaurant({ name: "Pizza Two" }));
+    await db.setRating(a.id, p.id, 6);
+    await db.setRating(b.id, p.id, 9);
+
+    await db.mergeRestaurants(a.id, b.id);
+    const merged = await db.getRestaurant(a.id);
+    expect(merged!.ratings[p.id]).toBe(9); // highest wins
+    expect(merged!.locationCount).toBe(2);
+    expect(await db.getRestaurant(b.id)).toBeNull();
+  });
+
+  it("splits one location out into its own brand", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam3", "h");
+    const db = new MemoryAdapter(other.id);
+    await db.createRestaurant(newRestaurant({ name: "Subway", googlePlaceId: "S1" }));
+    await db.createRestaurant(newRestaurant({ name: "Subway", googlePlaceId: "S2" }));
+    const brand = (await db.listRestaurants()).find((r) => r.name === "Subway")!;
+    expect(brand.locationCount).toBe(2);
+
+    const newId = await db.splitLocation(brand.id, brand.locations[0].id);
+    expect(newId).not.toBe(brand.id);
+    const subs = (await db.listRestaurants()).filter((r) => r.name === "Subway");
+    expect(subs).toHaveLength(2);
+    expect(subs.every((s) => s.locationCount === 1)).toBe(true);
   });
 });

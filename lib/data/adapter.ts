@@ -4,6 +4,7 @@ import {
   Profile,
   Restaurant,
   RestaurantFull,
+  RestaurantLocation,
   Settings,
   Visit,
   VisitMode,
@@ -59,31 +60,43 @@ export interface DataAdapter {
   updateProfile(id: string, data: Partial<Omit<Profile, "id">>): Promise<void>;
   deleteProfile(id: string): Promise<void>;
 
-  // restaurants (returned enriched with ratings + visit aggregates)
+  // brands (the family's tracked unit — one entry per restaurant, grouping its
+  // locations; returned enriched with brand-wide ratings + pooled visits).
+  // `id` arguments below are BRAND ids unless named restaurantId (a catalog
+  // location id).
   listRestaurants(): Promise<RestaurantFull[]>;
   getRestaurant(id: string): Promise<RestaurantFull | null>;
+  /** Add a catalog location and track it under its brand; returns the brand. */
   createRestaurant(data: NewRestaurant): Promise<Restaurant>;
+  /** Edit brand-level fields (name/status/notes/cuisines), and catalog facts when the brand has a single location. */
   updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void>;
+  /** Untrack a brand (its locations stay in the shared catalog). */
   deleteRestaurant(id: string): Promise<void>;
-  /** Stop tracking every wishlist restaurant for this group; returns how many. */
+  /** Stop tracking every wishlist brand for this group; returns how many. */
   clearWishlist(): Promise<number>;
   /** The shared master catalog, flagged with whether this group tracks each. */
   listCatalog(): Promise<CatalogEntry[]>;
-  /** Add a catalog restaurant to this group's list (active = been there). */
-  trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void>;
+  /** A single catalog location (for geocoding on track). */
+  getCatalogLocation(restaurantId: string): Promise<RestaurantLocation | null>;
+  /** Set a catalog location's coordinates (used after geocoding). */
+  setLocationCoords(restaurantId: string, lat: number, lng: number): Promise<void>;
+  /** Track a catalog location under its brand; returns the brand id. */
+  trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<string>;
   /** Bulk-add rows to the shared catalog, skipping dupes; returns count added. */
   addCatalogEntries(entries: CatalogInput[]): Promise<number>;
-  /** Fold `loserId` into `survivorId` (visits, ratings, tags, cuisines), then delete the loser. */
+  /** Merge brand `loserId` into `survivorId` (locations, ratings (highest wins), visits), then delete the loser brand. */
   mergeRestaurants(survivorId: string, loserId: string): Promise<void>;
+  /** Split one location out of `brandId` into its own brand; returns the new brand id. */
+  splitLocation(brandId: string, restaurantId: string): Promise<string>;
 
-  // ratings
-  setRating(restaurantId: string, profileId: string, score: number): Promise<void>;
-  clearRating(restaurantId: string, profileId: string): Promise<void>;
+  // ratings (brand-wide: one score per person per brand)
+  setRating(brandId: string, profileId: string, score: number): Promise<void>;
+  clearRating(brandId: string, profileId: string): Promise<void>;
 
-  // visits
-  addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void>;
+  // visits (logged at the brand level, pooled across locations)
+  addVisit(brandId: string, date: string, mode: VisitMode, note: string | null): Promise<void>;
   listRecentVisits(limit: number): Promise<Visit[]>;
-  listVisitsForRestaurant(restaurantId: string): Promise<Visit[]>;
+  listVisitsForRestaurant(brandId: string): Promise<Visit[]>;
 
   // family vote
   createVoteSession(candidateIds: string[]): Promise<VoteSession>;

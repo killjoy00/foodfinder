@@ -14,6 +14,7 @@ import {
   VoteSession,
 } from "../types";
 import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewRestaurant } from "./adapter";
+import { brandKey, buildBrand } from "../brand";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>;
@@ -86,7 +87,9 @@ function hasCatalogChange(data: Partial<NewRestaurant>): boolean {
 }
 
 function rowToVisit(row: Row): Visit {
-  return { id: row.id, restaurantId: row.restaurant_id, date: row.date, mode: row.mode, note: row.note };
+  // visits are brand-level now; expose the brand id in restaurantId (the
+  // app uses it only as an opaque grouping key)
+  return { id: row.id, restaurantId: row.brand_id ?? row.restaurant_id, date: row.date, mode: row.mode, note: row.note };
 }
 
 function rowToSession(row: Row): VoteSession {
@@ -235,111 +238,159 @@ export class SupabaseAdapter implements DataAdapter {
     await unwrap(this.client.from("profiles").delete().eq("id", id).eq("household_id", this.hid));
   }
 
-  private async enrich(links: Row[]): Promise<RestaurantFull[]> {
-    if (links.length === 0) return [];
-    const ids = links.map((l) => l.restaurant_id);
+  private async homeOrigin(): Promise<{ lat: number | null; lng: number | null } | null> {
+    const s = await this.getSettings();
+    if (s.homeLat === null || s.homeLng === null) return null;
+    return { lat: s.homeLat, lng: s.homeLng };
+  }
+
+  /** Build brands (with their locations, ratings, pooled visits) for display. */
+  private async enrichBrands(brandRows: Row[]): Promise<RestaurantFull[]> {
+    if (brandRows.length === 0) return [];
+    const brandIds = brandRows.map((b) => b.id);
     const members = await this.memberIds();
 
-    // Fetch in chunks so a long restaurant list doesn't overflow the request URL.
-    const catalogRows: Row[] = [];
-    const ratingRows: Row[] = [];
-    const visitRows: Row[] = [];
-    for (const part of chunk(ids, IN_CHUNK)) {
-      catalogRows.push(...((await unwrap(this.client.from("restaurants").select("*").in("id", part))) ?? []));
-      visitRows.push(
+    // which catalog locations belong to each brand
+    const linkRows: Row[] = [];
+    for (const part of chunk(brandIds, IN_CHUNK)) {
+      linkRows.push(
         ...((await unwrap(
           this.client
-            .from("visits")
-            .select("restaurant_id, date")
+            .from("group_restaurants")
+            .select("restaurant_id, brand_id")
             .eq("household_id", this.hid)
-            .in("restaurant_id", part)
+            .in("brand_id", part)
         )) ?? [])
       );
-      if (members.length) {
+    }
+    const restIds = [...new Set(linkRows.map((l) => l.restaurant_id))];
+    const catalogById = new Map<string, Catalog>();
+    for (const part of chunk(restIds, IN_CHUNK)) {
+      const rows = (await unwrap(this.client.from("restaurants").select("*").in("id", part))) ?? [];
+      for (const r of rows as Row[]) catalogById.set(r.id, rowToCatalog(r));
+    }
+
+    // brand-wide ratings
+    const ratingRows: Row[] = [];
+    if (members.length) {
+      for (const part of chunk(brandIds, IN_CHUNK)) {
         ratingRows.push(
           ...((await unwrap(
             this.client
-              .from("ratings")
-              .select("restaurant_id, profile_id, score")
-              .in("restaurant_id", part)
+              .from("brand_ratings")
+              .select("brand_id, profile_id, score")
+              .in("brand_id", part)
               .in("profile_id", members)
           )) ?? [])
         );
       }
     }
-
-    const overrides = (await this.getSettings()).cuisineOverrides ?? {};
-    const catalogById = new Map((catalogRows ?? []).map((r: Row) => [r.id, rowToCatalog(r)]));
-    const ratingsByR = new Map<string, Record<string, number>>();
-    for (const row of (ratingRows ?? []) as Row[]) {
-      const m = ratingsByR.get(row.restaurant_id) ?? {};
+    const ratingsByB = new Map<string, Record<string, number>>();
+    for (const row of ratingRows as Row[]) {
+      const m = ratingsByB.get(row.brand_id) ?? {};
       m[row.profile_id] = row.score;
-      ratingsByR.set(row.restaurant_id, m);
+      ratingsByB.set(row.brand_id, m);
+    }
+
+    // pooled visits per brand
+    const visitRows: Row[] = [];
+    for (const part of chunk(brandIds, IN_CHUNK)) {
+      visitRows.push(
+        ...((await unwrap(
+          this.client.from("visits").select("brand_id, date").eq("household_id", this.hid).in("brand_id", part)
+        )) ?? [])
+      );
     }
     const lastVisit = new Map<string, string>();
     const visitCount = new Map<string, number>();
-    for (const row of (visitRows ?? []) as Row[]) {
-      visitCount.set(row.restaurant_id, (visitCount.get(row.restaurant_id) ?? 0) + 1);
-      const prev = lastVisit.get(row.restaurant_id);
-      if (!prev || row.date > prev) lastVisit.set(row.restaurant_id, row.date);
+    for (const row of visitRows as Row[]) {
+      if (!row.brand_id) continue;
+      visitCount.set(row.brand_id, (visitCount.get(row.brand_id) ?? 0) + 1);
+      const prev = lastVisit.get(row.brand_id);
+      if (!prev || row.date > prev) lastVisit.set(row.brand_id, row.date);
     }
 
-    const out: RestaurantFull[] = [];
-    for (const link of links) {
+    const overrides = (await this.getSettings()).cuisineOverrides ?? {};
+    const home = await this.homeOrigin();
+    const locsByBrand = new Map<string, RestaurantLocation[]>();
+    for (const link of linkRows) {
       const c = catalogById.get(link.restaurant_id);
       if (!c) continue;
-      const cuisines = overrides[link.restaurant_id] ?? c.cuisines;
-      out.push({
-        ...c,
-        cuisines,
-        status: link.status,
-        notes: link.notes,
-        ratings: ratingsByR.get(link.restaurant_id) ?? {},
-        lastVisitAt: lastVisit.get(link.restaurant_id) ?? null,
-        visitCount: visitCount.get(link.restaurant_id) ?? 0,
-        locations: [catalogToLocation({ ...c, cuisines })],
-        locationCount: 1,
-      });
+      const arr = locsByBrand.get(link.brand_id) ?? [];
+      arr.push(catalogToLocation(c));
+      locsByBrand.set(link.brand_id, arr);
     }
-    return out;
+
+    return brandRows
+      .map((b) =>
+        buildBrand({
+          id: b.id,
+          name: b.name,
+          status: b.status,
+          notes: b.notes,
+          createdAt: b.created_at,
+          locations: locsByBrand.get(b.id) ?? [],
+          ratings: ratingsByB.get(b.id) ?? {},
+          lastVisitAt: lastVisit.get(b.id) ?? null,
+          visitCount: visitCount.get(b.id) ?? 0,
+          home,
+          cuisineOverride: overrides[b.id] ?? null,
+        })
+      )
+      .filter((b) => b.locationCount > 0);
   }
 
   async listRestaurants(): Promise<RestaurantFull[]> {
-    const links = await unwrap(
-      this.client.from("group_restaurants").select("*").eq("household_id", this.hid)
-    );
-    const full = await this.enrich(links ?? []);
+    const brands = await unwrap(this.client.from("brands").select("*").eq("household_id", this.hid));
+    const full = await this.enrichBrands(brands ?? []);
     return full.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async getRestaurant(id: string): Promise<RestaurantFull | null> {
-    const link = await unwrap(
-      this.client
-        .from("group_restaurants")
-        .select("*")
-        .eq("household_id", this.hid)
-        .eq("restaurant_id", id)
-        .maybeSingle()
+    const brand = await unwrap(
+      this.client.from("brands").select("*").eq("household_id", this.hid).eq("id", id).maybeSingle()
     );
-    if (!link) return null;
-    const [full] = await this.enrich([link]);
+    if (!brand) return null;
+    const [full] = await this.enrichBrands([brand]);
     return full ?? null;
   }
 
-  private async findCatalogId(data: NewRestaurant): Promise<string | null> {
-    if (data.googlePlaceId) {
-      const byPid = await unwrap(
-        this.client.from("restaurants").select("id").eq("google_place_id", data.googlePlaceId).maybeSingle()
-      );
-      if (byPid) return byPid.id;
-    }
-    // case-insensitive exact match; escape LIKE wildcards so a literal "%"
-    // or "_" in a name doesn't match unrelated rows
-    const pattern = data.name.trim().replace(/[\\%_]/g, "\\$&");
-    const byName = await unwrap(
-      this.client.from("restaurants").select("id").ilike("name", pattern).limit(1).maybeSingle()
+  /** Find or create the brand for a name within this household; returns its id. */
+  private async ensureBrandId(
+    name: string,
+    status: "active" | "wishlist",
+    notes: string | null
+  ): Promise<string> {
+    const key = brandKey(name);
+    const existing = await unwrap(
+      this.client
+        .from("brands")
+        .select("id")
+        .eq("household_id", this.hid)
+        .eq("brand_key", key)
+        .limit(1)
+        .maybeSingle()
     );
-    return byName?.id ?? null;
+    if (existing) return existing.id;
+    const row = (await unwrap(
+      this.client
+        .from("brands")
+        .insert({ household_id: this.hid, brand_key: key, name, status, notes })
+        .select("id")
+        .single()
+    )) as Row;
+    return row.id;
+  }
+
+  // Reuse a catalog row only for the same Google place — never by name, so
+  // distinct locations (and different-city namesakes) stay separate rows; the
+  // family's brand is what groups them.
+  private async findCatalogId(data: NewRestaurant): Promise<string | null> {
+    if (!data.googlePlaceId) return null;
+    const byPid = await unwrap(
+      this.client.from("restaurants").select("id").eq("google_place_id", data.googlePlaceId).maybeSingle()
+    );
+    return byPid?.id ?? null;
   }
 
   async createRestaurant(data: NewRestaurant): Promise<Restaurant> {
@@ -357,50 +408,56 @@ export class SupabaseAdapter implements DataAdapter {
       catalog = rowToCatalog(row);
       catalogId = catalog.id;
     }
+    const brandId = await this.ensureBrandId(data.name, data.status, data.notes);
+    const brandPatch: Row = { status: data.status };
+    if (data.notes) brandPatch.notes = data.notes;
+    await unwrap(this.client.from("brands").update(brandPatch).eq("id", brandId).eq("household_id", this.hid));
     await unwrap(
       this.client.from("group_restaurants").upsert(
-        { household_id: this.hid, restaurant_id: catalogId, status: data.status, notes: data.notes },
+        { household_id: this.hid, restaurant_id: catalogId, brand_id: brandId },
         { onConflict: "household_id,restaurant_id" }
       )
     );
-    return { ...catalog, status: data.status, notes: data.notes };
+    // id is the brand id so callers land on the brand entry
+    return { ...catalog, id: brandId, status: data.status, notes: data.notes };
   }
 
   async updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void> {
-    if (hasCatalogChange(data)) {
-      await unwrap(this.client.from("restaurants").update(catalogToRow(data)).eq("id", id));
+    // brand-level fields
+    const brandPatch: Row = {};
+    if (data.name !== undefined) brandPatch.name = data.name;
+    if (data.status !== undefined) brandPatch.status = data.status;
+    if (data.notes !== undefined) brandPatch.notes = data.notes;
+    if (Object.keys(brandPatch).length) {
+      await unwrap(this.client.from("brands").update(brandPatch).eq("id", id).eq("household_id", this.hid));
     }
-    if (data.status !== undefined || data.notes !== undefined) {
-      const patch: Row = {};
-      if (data.status !== undefined) patch.status = data.status;
-      if (data.notes !== undefined) patch.notes = data.notes;
-      await unwrap(
-        this.client
-          .from("group_restaurants")
-          .update(patch)
-          .eq("household_id", this.hid)
-          .eq("restaurant_id", id)
-      );
+    if (data.cuisines !== undefined) {
+      try {
+        const settings = await this.getSettings();
+        const overrides = { ...(settings.cuisineOverrides ?? {}), [id]: data.cuisines };
+        await this.saveSettings({ ...settings, cuisineOverrides: overrides });
+      } catch {
+        // a settings failure shouldn't break the core edit
+      }
+    }
+    // catalog facts (address/coords/price/tags) only apply to a single-location brand
+    const links = await unwrap(
+      this.client.from("group_restaurants").select("restaurant_id").eq("household_id", this.hid).eq("brand_id", id)
+    );
+    if ((links ?? []).length === 1 && hasCatalogChange(data)) {
+      const patch = catalogToRow(data);
+      delete patch.cuisines; // cuisines are a per-family brand override, not a catalog edit
+      if (Object.keys(patch).length) {
+        await unwrap(this.client.from("restaurants").update(patch).eq("id", links![0].restaurant_id));
+      }
     }
   }
 
   async deleteRestaurant(id: string): Promise<void> {
-    await unwrap(
-      this.client
-        .from("group_restaurants")
-        .delete()
-        .eq("household_id", this.hid)
-        .eq("restaurant_id", id)
-    );
-    await unwrap(
-      this.client.from("visits").delete().eq("household_id", this.hid).eq("restaurant_id", id)
-    );
-    const members = await this.memberIds();
-    if (members.length) {
-      await unwrap(
-        this.client.from("ratings").delete().eq("restaurant_id", id).in("profile_id", members)
-      );
-    }
+    await unwrap(this.client.from("visits").delete().eq("household_id", this.hid).eq("brand_id", id));
+    await unwrap(this.client.from("brand_ratings").delete().eq("brand_id", id));
+    await unwrap(this.client.from("group_restaurants").delete().eq("household_id", this.hid).eq("brand_id", id));
+    await unwrap(this.client.from("brands").delete().eq("id", id).eq("household_id", this.hid));
   }
 
   /**
@@ -428,16 +485,19 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
-    const [catalog, links] = await Promise.all([
+    const [catalog, links, brands] = await Promise.all([
       this.fetchAllCatalogRows(),
       unwrap(
-        this.client
-          .from("group_restaurants")
-          .select("restaurant_id, status")
-          .eq("household_id", this.hid)
+        this.client.from("group_restaurants").select("restaurant_id, brand_id").eq("household_id", this.hid)
       ),
+      unwrap(this.client.from("brands").select("id, status").eq("household_id", this.hid)),
     ]);
-    const linkByR = new Map((links ?? []).map((l: Row) => [l.restaurant_id, l.status]));
+    const statusByBrand = new Map((brands ?? []).map((b: Row) => [b.id, b.status]));
+    const statusByR = new Map<string, "active" | "wishlist">();
+    for (const l of (links ?? []) as Row[]) {
+      const st = statusByBrand.get(l.brand_id);
+      if (st) statusByR.set(l.restaurant_id, st);
+    }
     return catalog.map((c: Row) => ({
       id: c.id,
       name: c.name,
@@ -447,9 +507,20 @@ export class SupabaseAdapter implements DataAdapter {
       lat: c.lat,
       lng: c.lng,
       mapsUrl: c.maps_url,
-      tracked: linkByR.has(c.id),
-      trackedStatus: linkByR.get(c.id) ?? null,
+      tracked: statusByR.has(c.id),
+      trackedStatus: statusByR.get(c.id) ?? null,
     }));
+  }
+
+  async getCatalogLocation(restaurantId: string): Promise<RestaurantLocation | null> {
+    const row = await unwrap(
+      this.client.from("restaurants").select("*").eq("id", restaurantId).maybeSingle()
+    );
+    return row ? catalogToLocation(rowToCatalog(row)) : null;
+  }
+
+  async setLocationCoords(restaurantId: string, lat: number, lng: number): Promise<void> {
+    await unwrap(this.client.from("restaurants").update({ lat, lng }).eq("id", restaurantId));
   }
 
   async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
@@ -504,133 +575,129 @@ export class SupabaseAdapter implements DataAdapter {
     return added;
   }
 
-  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<void> {
-    await unwrap(
-      this.client
-        .from("group_restaurants")
-        .upsert(
-          { household_id: this.hid, restaurant_id: restaurantId, status },
-          { onConflict: "household_id,restaurant_id" }
-        )
+  async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<string> {
+    const cat = await unwrap(
+      this.client.from("restaurants").select("name").eq("id", restaurantId).maybeSingle()
     );
+    if (!cat) return "";
+    const brandId = await this.ensureBrandId(cat.name, status, null);
+    await unwrap(this.client.from("brands").update({ status }).eq("id", brandId).eq("household_id", this.hid));
+    await unwrap(
+      this.client.from("group_restaurants").upsert(
+        { household_id: this.hid, restaurant_id: restaurantId, brand_id: brandId },
+        { onConflict: "household_id,restaurant_id" }
+      )
+    );
+    return brandId;
   }
 
   async clearWishlist(): Promise<number> {
-    const links = await unwrap(
-      this.client
-        .from("group_restaurants")
-        .select("restaurant_id")
-        .eq("household_id", this.hid)
-        .eq("status", "wishlist")
+    const brands = await unwrap(
+      this.client.from("brands").select("id").eq("household_id", this.hid).eq("status", "wishlist")
     );
-    const ids = (links ?? []).map((r: Row) => r.restaurant_id);
+    const ids = (brands ?? []).map((b: Row) => b.id);
     if (ids.length === 0) return 0;
-    await unwrap(
-      this.client
-        .from("group_restaurants")
-        .delete()
-        .eq("household_id", this.hid)
-        .eq("status", "wishlist")
-    );
-    const members = await this.memberIds();
     for (const part of chunk(ids, IN_CHUNK)) {
-      await unwrap(
-        this.client.from("visits").delete().eq("household_id", this.hid).in("restaurant_id", part)
-      );
-      if (members.length) {
-        await unwrap(
-          this.client.from("ratings").delete().in("restaurant_id", part).in("profile_id", members)
-        );
-      }
+      await unwrap(this.client.from("visits").delete().eq("household_id", this.hid).in("brand_id", part));
+      await unwrap(this.client.from("brand_ratings").delete().in("brand_id", part));
+      await unwrap(this.client.from("group_restaurants").delete().eq("household_id", this.hid).in("brand_id", part));
+      await unwrap(this.client.from("brands").delete().eq("household_id", this.hid).in("id", part));
     }
     return ids.length;
   }
 
+  /** Merge brand `loserId` into `survivorId`; ratings keep the highest per person. */
   async mergeRestaurants(survivorId: string, loserId: string): Promise<void> {
     if (survivorId === loserId) return;
     const [survivor, loser] = await Promise.all([
-      unwrap(this.client.from("restaurants").select("*").eq("id", survivorId).maybeSingle()),
-      unwrap(this.client.from("restaurants").select("*").eq("id", loserId).maybeSingle()),
+      unwrap(this.client.from("brands").select("*").eq("id", survivorId).eq("household_id", this.hid).maybeSingle()),
+      unwrap(this.client.from("brands").select("*").eq("id", loserId).eq("household_id", this.hid).maybeSingle()),
     ]);
     if (!survivor || !loser) return;
 
-    if (!survivor.google_place_id && loser.google_place_id) {
-      await unwrap(this.client.from("restaurants").update({ google_place_id: null }).eq("id", loserId));
+    await unwrap(
+      this.client.from("group_restaurants").update({ brand_id: survivorId }).eq("household_id", this.hid).eq("brand_id", loserId)
+    );
+    await unwrap(
+      this.client.from("visits").update({ brand_id: survivorId }).eq("household_id", this.hid).eq("brand_id", loserId)
+    );
+
+    const [survR, loseR] = await Promise.all([
+      unwrap(this.client.from("brand_ratings").select("profile_id, score").eq("brand_id", survivorId)),
+      unwrap(this.client.from("brand_ratings").select("profile_id, score").eq("brand_id", loserId)),
+    ]);
+    const survMap = new Map((survR ?? []).map((r: Row) => [r.profile_id, r.score as number]));
+    const upserts = ((loseR ?? []) as Row[]).map((r) => {
+      const cur = survMap.get(r.profile_id);
+      return {
+        brand_id: survivorId,
+        profile_id: r.profile_id,
+        score: cur === undefined ? r.score : Math.max(cur, r.score),
+        updated_at: new Date().toISOString(),
+      };
+    });
+    if (upserts.length) {
+      await unwrap(this.client.from("brand_ratings").upsert(upserts, { onConflict: "brand_id,profile_id" }));
     }
-    await unwrap(
-      this.client
-        .from("restaurants")
-        .update({
-          cuisines: [...new Set([...(survivor.cuisines ?? []), ...(loser.cuisines ?? [])])],
-          tags: [...new Set([...(survivor.tags ?? []), ...(loser.tags ?? [])])],
-          address: survivor.address ?? loser.address,
-          lat: survivor.lat ?? loser.lat,
-          lng: survivor.lng ?? loser.lng,
-          google_place_id: survivor.google_place_id ?? loser.google_place_id,
-          maps_url: survivor.maps_url ?? loser.maps_url,
-          reserve_url: survivor.reserve_url ?? loser.reserve_url,
-        })
-        .eq("id", survivorId)
-    );
+    await unwrap(this.client.from("brand_ratings").delete().eq("brand_id", loserId));
 
-    // repoint group links for households that don't already track the survivor
-    const survLinks = await unwrap(
-      this.client.from("group_restaurants").select("household_id").eq("restaurant_id", survivorId)
-    );
-    const survHouseholds = (survLinks ?? []).map((r: Row) => r.household_id);
-    let moveLinks = this.client
-      .from("group_restaurants")
-      .update({ restaurant_id: survivorId })
-      .eq("restaurant_id", loserId);
-    if (survHouseholds.length) moveLinks = moveLinks.not("household_id", "in", `(${survHouseholds.join(",")})`);
-    await unwrap(moveLinks);
-
-    await unwrap(
-      this.client.from("visits").update({ restaurant_id: survivorId }).eq("restaurant_id", loserId)
-    );
-
-    const survRatings = await unwrap(
-      this.client.from("ratings").select("profile_id").eq("restaurant_id", survivorId)
-    );
-    const ratedProfiles = (survRatings ?? []).map((r: Row) => r.profile_id);
-    let moveRatings = this.client
-      .from("ratings")
-      .update({ restaurant_id: survivorId })
-      .eq("restaurant_id", loserId);
-    if (ratedProfiles.length) moveRatings = moveRatings.not("profile_id", "in", `(${ratedProfiles.join(",")})`);
-    await unwrap(moveRatings);
-
-    await unwrap(this.client.from("restaurants").delete().eq("id", loserId));
+    const patch: Row = {};
+    if (survivor.status !== "active" && loser.status === "active") patch.status = "active";
+    if (!survivor.notes && loser.notes) patch.notes = loser.notes;
+    if (Object.keys(patch).length) await unwrap(this.client.from("brands").update(patch).eq("id", survivorId));
+    await unwrap(this.client.from("brands").delete().eq("id", loserId).eq("household_id", this.hid));
   }
 
-  async setRating(restaurantId: string, profileId: string, score: number): Promise<void> {
+  async splitLocation(brandId: string, restaurantId: string): Promise<string> {
+    const [link, parent, cat] = await Promise.all([
+      unwrap(
+        this.client
+          .from("group_restaurants")
+          .select("restaurant_id")
+          .eq("household_id", this.hid)
+          .eq("brand_id", brandId)
+          .eq("restaurant_id", restaurantId)
+          .maybeSingle()
+      ),
+      unwrap(this.client.from("brands").select("status").eq("id", brandId).eq("household_id", this.hid).maybeSingle()),
+      unwrap(this.client.from("restaurants").select("name").eq("id", restaurantId).maybeSingle()),
+    ]);
+    if (!link || !parent || !cat) return brandId;
+    const row = (await unwrap(
+      this.client
+        .from("brands")
+        .insert({ household_id: this.hid, brand_key: brandKey(cat.name), name: cat.name, status: parent.status })
+        .select("id")
+        .single()
+    )) as Row;
+    await unwrap(
+      this.client.from("group_restaurants").update({ brand_id: row.id }).eq("household_id", this.hid).eq("restaurant_id", restaurantId)
+    );
+    return row.id;
+  }
+
+  async setRating(brandId: string, profileId: string, score: number): Promise<void> {
     const members = await this.memberIds();
     if (!members.includes(profileId)) return;
     await unwrap(
-      this.client.from("ratings").upsert(
-        { restaurant_id: restaurantId, profile_id: profileId, score, updated_at: new Date().toISOString() },
-        { onConflict: "restaurant_id,profile_id" }
+      this.client.from("brand_ratings").upsert(
+        { brand_id: brandId, profile_id: profileId, score, updated_at: new Date().toISOString() },
+        { onConflict: "brand_id,profile_id" }
       )
     );
   }
 
-  async clearRating(restaurantId: string, profileId: string): Promise<void> {
+  async clearRating(brandId: string, profileId: string): Promise<void> {
     const members = await this.memberIds();
     if (!members.includes(profileId)) return;
     await unwrap(
-      this.client
-        .from("ratings")
-        .delete()
-        .eq("restaurant_id", restaurantId)
-        .eq("profile_id", profileId)
+      this.client.from("brand_ratings").delete().eq("brand_id", brandId).eq("profile_id", profileId)
     );
   }
 
-  async addVisit(restaurantId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
+  async addVisit(brandId: string, date: string, mode: VisitMode, note: string | null): Promise<void> {
     await unwrap(
-      this.client
-        .from("visits")
-        .insert({ household_id: this.hid, restaurant_id: restaurantId, date, mode, note })
+      this.client.from("visits").insert({ household_id: this.hid, brand_id: brandId, date, mode, note })
     );
   }
 
@@ -646,13 +713,13 @@ export class SupabaseAdapter implements DataAdapter {
     return (rows ?? []).map(rowToVisit);
   }
 
-  async listVisitsForRestaurant(restaurantId: string): Promise<Visit[]> {
+  async listVisitsForRestaurant(brandId: string): Promise<Visit[]> {
     const rows = await unwrap(
       this.client
         .from("visits")
         .select("*")
         .eq("household_id", this.hid)
-        .eq("restaurant_id", restaurantId)
+        .eq("brand_id", brandId)
         .order("date", { ascending: false })
     );
     return (rows ?? []).map(rowToVisit);
