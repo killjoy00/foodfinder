@@ -46,13 +46,16 @@ export function eaterScore(r: RestaurantFull, eaterIds: string[]): number {
 }
 
 /**
- * The ratings that matter for tonight: just the selected eaters' scores, or
- * every rater's when nobody's been singled out. Members who haven't rated the
- * place are skipped.
+ * Lowest rating among the selected eaters who have rated it (all raters when
+ * nobody is selected); null when none of them have rated it yet. The quality
+ * bar uses this so every eater at the table clears it, not just one of them.
  */
-export function relevantScores(r: RestaurantFull, eaterIds: string[]): number[] {
+export function minRelevantScore(r: RestaurantFull, eaterIds: string[]): number | null {
   const ids = eaterIds.length > 0 ? eaterIds : Object.keys(r.ratings);
-  return ids.map((id) => r.ratings[id]).filter((s): s is number => s !== undefined);
+  const scores = ids
+    .map((id) => r.ratings[id])
+    .filter((s): s is number => s !== undefined);
+  return scores.length > 0 ? Math.min(...scores) : null;
 }
 
 /**
@@ -61,7 +64,8 @@ export function relevantScores(r: RestaurantFull, eaterIds: string[]): number[] 
  * two ratings can't disagree, so they keep full weight.
  */
 function eaterAgreement(r: RestaurantFull, eaterIds: string[]): number {
-  const scores = relevantScores(r, eaterIds);
+  const ids = eaterIds.length > 0 ? eaterIds : Object.keys(r.ratings);
+  const scores = ids.map((id) => r.ratings[id]).filter((s): s is number => s !== undefined);
   if (scores.length < 2) return 1;
   const spread = Math.max(...scores) - Math.min(...scores);
   return 1 - (0.5 * Math.min(spread, 8)) / 8;
@@ -101,18 +105,11 @@ export function passesFilters(r: RestaurantFull, f: PickerFilters): boolean {
     if (!rSpecials.some((s) => selected.has(s))) return false;
   }
   if (f.minScore > 0) {
-    // the quality bar, judged only by who's eating: every selected eater who's
-    // rated it has to clear the bar (so the wheel can't land on a place one of
-    // them dislikes — and so a non-eater's rating never sneaks a place in).
-    const scores = relevantScores(r, f.eaterIds);
-    if (scores.length > 0) {
-      if (Math.min(...scores) < f.minScore) return false;
-    } else if (f.eaterIds.length > 0 && Object.keys(r.ratings).length > 0) {
-      // tonight's eaters haven't rated it but other members have — it's not a
-      // fresh wishlist find, so don't surface it under their bar. (A place
-      // nobody has rated yet stays eligible.)
-      return false;
-    }
+    // the quality bar: every eater at the table who's rated it has to clear
+    // the bar (so the wheel can't land on a place someone dislikes). Unrated
+    // places stay eligible so the wishlist isn't locked out.
+    const worst = minRelevantScore(r, f.eaterIds);
+    if (worst !== null && worst < f.minScore) return false;
   }
   if (f.mode === "takeout" && r.tags.length > 0 && !r.tags.includes("takeout")) {
     // only enforce when the restaurant has been tagged at all
