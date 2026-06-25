@@ -430,7 +430,8 @@ export class MemoryAdapter implements DataAdapter {
       const catalog = s.restaurants.find((r) => r.id === links[0].restaurantId);
       if (catalog) {
         if (data.name !== undefined) catalog.name = data.name;
-        for (const k of ["price", "address", "lat", "lng", "googlePlaceId", "mapsUrl", "reserveUrl", "tags"] as const) {
+        // never reassign googlePlaceId on an edit (it's the location's identity)
+        for (const k of ["price", "address", "lat", "lng", "mapsUrl", "reserveUrl", "tags"] as const) {
           if (data[k] !== undefined) (catalog as Record<string, unknown>)[k] = data[k];
         }
       }

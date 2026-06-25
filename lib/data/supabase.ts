@@ -447,6 +447,10 @@ export class SupabaseAdapter implements DataAdapter {
     if ((links ?? []).length === 1 && hasCatalogChange(data)) {
       const patch = catalogToRow(data);
       delete patch.cuisines; // cuisines are a per-family brand override, not a catalog edit
+      // never reassign a location's Google place id on an edit: it's the row's
+      // identity and a new id (e.g. picked from autocomplete) would collide with
+      // the unique constraint when that place already exists in the catalog
+      delete patch.google_place_id;
       if (Object.keys(patch).length) {
         await unwrap(this.client.from("restaurants").update(patch).eq("id", links![0].restaurant_id));
       }

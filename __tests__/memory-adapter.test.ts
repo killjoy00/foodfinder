@@ -254,4 +254,21 @@ describe("brand grouping", () => {
     expect(subs).toHaveLength(2);
     expect(subs.every((s) => s.locationCount === 1)).toBe(true);
   });
+
+  it("editing an address updates coords but never reassigns the place id", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam4", "h");
+    const db = new MemoryAdapter(other.id);
+    const brand = await db.createRestaurant(
+      newRestaurant({ name: "Cafe", googlePlaceId: "ORIG", address: "1 Old St", lat: 30.1, lng: -97.1 })
+    );
+    // an address edit (autocomplete would submit a NEW place id) must not change identity
+    await db.updateRestaurant(brand.id, {
+      name: "Cafe", cuisines: [], price: 2, address: "2 New Ave", lat: 30.5, lng: -97.5,
+      googlePlaceId: "DIFFERENT", mapsUrl: null, reserveUrl: null, tags: [], status: "active", notes: null,
+    });
+    const after = (await db.getRestaurant(brand.id))!;
+    expect(after.locations[0].address).toBe("2 New Ave");
+    expect(after.locations[0].lat).toBe(30.5);
+    expect(after.locations[0].googlePlaceId).toBe("ORIG"); // identity preserved
+  });
 });
