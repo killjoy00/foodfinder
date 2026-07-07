@@ -19,7 +19,9 @@ import {
   buildCandidates,
   buildCuisineRecency,
   collapseChains,
+  pickWeighted,
   sampleCandidates,
+  weighCandidate,
 } from "@/lib/picker";
 import { geocodeAddress, zipToCoords } from "@/lib/geocode";
 import { distanceMiles } from "@/lib/distance";
@@ -27,8 +29,14 @@ import { findRecommendations } from "@/lib/recommend";
 import { placesKey } from "@/lib/places";
 import { runDiscoverySweep, SweepResult } from "@/lib/sweep";
 import { TakeoutItem, starToScore } from "@/lib/takeout";
-import { tallyVotes } from "@/lib/vote";
-import { RestaurantStatus, Settings, VisitMode } from "@/lib/types";
+import { nominationCandidates, tallyVotes } from "@/lib/vote";
+import {
+  NOMINATIONS_PER_PROFILE,
+  RestaurantFull,
+  RestaurantStatus,
+  Settings,
+  VisitMode,
+} from "@/lib/types";
 
 // ---------- auth & profiles ----------
 
@@ -332,6 +340,9 @@ export async function castVoteAction(
     await adapter.castVote(sessionId, profile.id, null, null, true);
   } else {
     if (pickId && vetoId && pickId === vetoId) return;
+    // a pick or veto has to be one of this session's candidates
+    if (pickId && !session.candidateIds.includes(pickId)) return;
+    if (vetoId && !session.candidateIds.includes(vetoId)) return;
     await adapter.castVote(sessionId, profile.id, pickId, vetoId, false);
   }
   revalidatePath("/vote");
@@ -339,23 +350,28 @@ export async function castVoteAction(
 
 export async function closeVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
-  const session = await (await db()).getVoteSession(sessionId);
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
   if (!session || session.status !== "open") return;
-  const [votes, profiles] = await Promise.all([(await db()).listVotes(sessionId), (await db()).listProfiles()]);
+  const [votes, profiles] = await Promise.all([adapter.listVotes(sessionId), adapter.listProfiles()]);
+  // closing an untouched ballot shouldn't crown a random winner
+  if (votes.length === 0) return;
 
   // a banked double-vote credit makes this round's pick count twice
   const creditOf = new Map(profiles.map((p) => [p.id, p.doubleCredits]));
   const weightOf = (profileId: string) => ((creditOf.get(profileId) ?? 0) > 0 ? 2 : 1);
   const winnerId = tallyVotes(session.candidateIds, votes, Math.random, weightOf);
-  await (await db()).closeVoteSession(sessionId, winnerId);
+  // only the close that actually flips the session settles credits, so two
+  // people tapping "Close" at once can't bank or spend them twice
+  if (!(await adapter.closeVoteSession(sessionId, winnerId))) return;
 
   // settle credits: bank one per deferral, spend one when a credit was used
   for (const v of votes) {
     const credits = creditOf.get(v.profileId) ?? 0;
     if (v.deferred) {
-      await (await db()).setDoubleCredits(v.profileId, credits + 1);
+      await adapter.setDoubleCredits(v.profileId, credits + 1);
     } else if (v.pickId && credits > 0) {
-      await (await db()).setDoubleCredits(v.profileId, credits - 1);
+      await adapter.setDoubleCredits(v.profileId, credits - 1);
     }
   }
   revalidatePath("/vote");
@@ -365,6 +381,132 @@ export async function cancelVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
   await (await db()).closeVoteSession(sessionId, null);
   revalidatePath("/vote");
+}
+
+// ---------- nomination rounds ----------
+
+export async function startNominationRoundAction(): Promise<void> {
+  await requireProfile();
+  await (await db()).createNominationSession();
+  revalidatePath("/vote");
+}
+
+/** Nominate one of the family's tracked places into an open nomination round. */
+export async function nominateAction(sessionId: string, brandId: string): Promise<void> {
+  const profile = await requireProfile();
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
+  if (!session || session.status !== "nominating") return;
+  if (!(await adapter.getRestaurant(brandId))) return;
+  const mine = (await adapter.listNominations(sessionId)).filter((n) => n.profileId === profile.id);
+  if (mine.length >= NOMINATIONS_PER_PROFILE) return;
+  await adapter.addNomination(sessionId, profile.id, brandId);
+  revalidatePath("/vote");
+}
+
+/**
+ * Nominate a brand-new place (e.g. from Google autocomplete): it joins the
+ * family's list as a wishlist entry through the normal create flow, then
+ * gets nominated. If the place matches an existing brand, that brand is
+ * nominated instead of creating a duplicate.
+ */
+export async function nominateNewPlaceAction(
+  sessionId: string,
+  place: {
+    name: string;
+    address: string | null;
+    lat: number | null;
+    lng: number | null;
+    googlePlaceId: string | null;
+    mapsUrl: string | null;
+    priceLevel: number | null;
+    cuisines: string[];
+  }
+): Promise<void> {
+  const profile = await requireProfile();
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
+  if (!session || session.status !== "nominating") return;
+  const name = place.name.trim();
+  if (!name) return;
+  const mine = (await adapter.listNominations(sessionId)).filter((n) => n.profileId === profile.id);
+  if (mine.length >= NOMINATIONS_PER_PROFILE) return;
+  const created = await adapter.createRestaurant(
+    await ensureCoords({
+      name,
+      cuisines: place.cuisines ?? [],
+      price: Math.min(4, Math.max(1, place.priceLevel ?? 2)),
+      address: place.address?.trim() || null,
+      lat: place.lat,
+      lng: place.lng,
+      googlePlaceId: place.googlePlaceId?.trim() || null,
+      mapsUrl: place.mapsUrl?.trim() || null,
+      reserveUrl: null,
+      tags: [],
+      status: "wishlist",
+      notes: null,
+    })
+  );
+  await adapter.addNomination(sessionId, profile.id, created.id);
+  revalidatePath("/vote");
+  revalidatePath("/restaurants");
+}
+
+export async function removeNominationAction(sessionId: string, brandId: string): Promise<void> {
+  const profile = await requireProfile();
+  await (await db()).removeNomination(sessionId, profile.id, brandId);
+  revalidatePath("/vote");
+}
+
+/** Close nominations and put the nominated places up for a normal vote. */
+export async function openVotingAction(sessionId: string): Promise<void> {
+  await requireProfile();
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
+  if (!session || session.status !== "nominating") return;
+  const nominations = await adapter.listNominations(sessionId);
+  const candidateIds = nominationCandidates(nominations, NOMINATIONS_PER_PROFILE).map(
+    (c) => c.brandId
+  );
+  if (candidateIds.length < 2) return;
+  await adapter.openVoting(sessionId, candidateIds.slice(0, 8));
+  revalidatePath("/vote");
+}
+
+export type NominationSpin = { winnerId: string; segmentIds: string[] } | null;
+
+/**
+ * "Let the wheel decide": weighted-pick a winner among the nominations
+ * (favorites and recency still matter, via the same weights as the wheel)
+ * and close the round. Returns the winner + segment ids so the client can
+ * play the spin animation, or null if the round was already over.
+ */
+export async function spinNominationsAction(sessionId: string): Promise<NominationSpin> {
+  await requireProfile();
+  const adapter = await db();
+  const session = await adapter.getVoteSession(sessionId);
+  if (!session || session.status !== "nominating") return null;
+  const nominations = await adapter.listNominations(sessionId);
+  const ids = nominationCandidates(nominations, NOMINATIONS_PER_PROFILE).map((c) => c.brandId);
+  if (ids.length === 0) return null;
+
+  const [restaurants, recentVisits] = await Promise.all([
+    adapter.listRestaurants(),
+    adapter.listRecentVisits(50),
+  ]);
+  const byId = new Map(restaurants.map((r) => [r.id, r]));
+  const pool = ids.map((id) => byId.get(id)).filter((r): r is RestaurantFull => !!r);
+  if (pool.length === 0) return null;
+  const cuisineRecency = buildCuisineRecency(
+    recentVisits,
+    new Map(restaurants.map((r) => [r.id, r.cuisines]))
+  );
+  const weighted = pool.map((r) => weighCandidate(r, DEFAULT_FILTERS, cuisineRecency));
+  const pick = pickWeighted(weighted) ?? weighted[0];
+  if (!(await adapter.closeVoteSession(sessionId, pick.restaurant.id))) return null;
+  // no revalidatePath here: it would swap the page to the winner view before
+  // the wheel animation plays — the client refreshes once the spin lands
+  return { winnerId: pick.restaurant.id, segmentIds: pool.map((r) => r.id) };
 }
 
 // ---------- discovery & recommendations ----------

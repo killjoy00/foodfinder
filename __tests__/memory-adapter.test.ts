@@ -88,6 +88,141 @@ describe("MemoryAdapter vote deferral + credits", () => {
   });
 });
 
+describe("MemoryAdapter nomination rounds", () => {
+  beforeEach(freshStore);
+
+  it("runs the lifecycle: nominate → open voting → close", async () => {
+    const db = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const [mom, dad] = await db.listProfiles();
+    const [r1, r2] = await db.listRestaurants();
+
+    const session = await db.createNominationSession();
+    expect((await db.getNominatingSession())?.id).toBe(session.id);
+    expect(await db.getOpenVoteSession()).toBeNull(); // not open yet
+
+    await db.addNomination(session.id, mom.id, r1.id);
+    await db.addNomination(session.id, mom.id, r1.id); // duplicate — ignored
+    await db.addNomination(session.id, dad.id, r2.id);
+    expect(await db.listNominations(session.id)).toHaveLength(2);
+
+    expect(await db.openVoting(session.id, [r1.id, r2.id])).toBe(true);
+    expect(await db.getNominatingSession()).toBeNull();
+    const open = await db.getOpenVoteSession();
+    expect(open?.id).toBe(session.id);
+    expect(open?.candidateIds).toEqual([r1.id, r2.id]);
+    expect(await db.openVoting(session.id, [r1.id])).toBe(false); // only once
+
+    // nominations are frozen once voting starts
+    await db.addNomination(session.id, dad.id, r1.id);
+    expect(await db.listNominations(session.id)).toHaveLength(2);
+
+    expect(await db.closeVoteSession(session.id, r1.id)).toBe(true);
+    const closed = await db.getVoteSession(session.id);
+    expect(closed?.status).toBe("closed");
+    expect(closed?.winnerId).toBe(r1.id);
+    expect(closed?.closedAt).not.toBeNull();
+  });
+
+  it("closing is idempotent: the second close reports false and changes nothing", async () => {
+    const db = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const session = await db.createVoteSession(["a", "b"]);
+    expect(await db.closeVoteSession(session.id, "a")).toBe(true);
+    expect(await db.closeVoteSession(session.id, "b")).toBe(false);
+    expect((await db.getVoteSession(session.id))?.winnerId).toBe("a");
+  });
+
+  it("starting any new round supersedes a live nomination round", async () => {
+    const db = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const round = await db.createNominationSession();
+    await db.createVoteSession(["a", "b"]);
+    expect(await db.getNominatingSession()).toBeNull();
+    expect((await db.getVoteSession(round.id))?.status).toBe("closed");
+  });
+
+  it("scopes nominations to the household", async () => {
+    const other = await new MemoryRegistry().createHousehold("Cousins", "h");
+    const a = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const b = new MemoryAdapter(other.id);
+    const session = await a.createNominationSession();
+    const [mom] = await a.listProfiles();
+    await a.addNomination(session.id, mom.id, "brand-r1");
+    // another household can't see or touch the round
+    expect(await b.listNominations(session.id)).toEqual([]);
+    await b.removeNomination(session.id, mom.id, "brand-r1");
+    expect(await a.listNominations(session.id)).toHaveLength(1);
+  });
+});
+
+describe("brand status on add/track (no demotion)", () => {
+  beforeEach(freshStore);
+
+  it("adding a wishlist location to an active brand keeps it active", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam", "h");
+    const db = new MemoryAdapter(other.id);
+    const brand = await db.createRestaurant(
+      newRestaurant({ name: "Chick-fil-A", googlePlaceId: "L1", status: "active" })
+    );
+    await db.createRestaurant(
+      newRestaurant({ name: "Chick-fil-A", googlePlaceId: "L2", status: "wishlist" })
+    );
+    expect((await db.getRestaurant(brand.id))?.status).toBe("active");
+  });
+
+  it("adding an active location promotes a wishlist brand", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam", "h");
+    const db = new MemoryAdapter(other.id);
+    const brand = await db.createRestaurant(
+      newRestaurant({ name: "Subway", googlePlaceId: "S1", status: "wishlist" })
+    );
+    const again = await db.createRestaurant(
+      newRestaurant({ name: "Subway", googlePlaceId: "S2", status: "active" })
+    );
+    expect(again.status).toBe("active");
+    expect((await db.getRestaurant(brand.id))?.status).toBe("active");
+  });
+
+  it("tracking a catalog location never demotes an active brand", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam", "h");
+    const db = new MemoryAdapter(other.id);
+    const brand = await db.createRestaurant(
+      newRestaurant({ name: "Taqueria Norte", googlePlaceId: "T1", status: "active" })
+    );
+    const loc = (await db.listCatalog()).find((c) => c.name === "Taqueria Norte")!;
+    await db.trackRestaurant(loc.id, "wishlist");
+    expect((await db.getRestaurant(brand.id))?.status).toBe("active");
+  });
+});
+
+describe("shared catalog edit protection", () => {
+  beforeEach(freshStore);
+
+  it("does not write catalog facts when another household tracks the location", async () => {
+    const other = await new MemoryRegistry().createHousehold("Cousins", "h");
+    const a = new MemoryAdapter(DEMO_HOUSEHOLD_ID);
+    const b = new MemoryAdapter(other.id);
+
+    const made = await a.createRestaurant(
+      newRestaurant({ name: "Shared Spot", googlePlaceId: "PIDX", address: "1 Old St", price: 2 })
+    );
+    const loc = (await a.listCatalog()).find((c) => c.name === "Shared Spot")!;
+    await b.trackRestaurant(loc.id, "active");
+
+    await a.updateRestaurant(made.id, { address: "666 Vandal Ave", price: 4 });
+
+    const seenByB = (await b.listRestaurants()).find((r) => r.name === "Shared Spot")!;
+    expect(seenByB.address).toBe("1 Old St"); // B's data untouched
+    expect(seenByB.price).toBe(2);
+  });
+
+  it("still writes catalog facts when only this household tracks it", async () => {
+    const other = await new MemoryRegistry().createHousehold("Fam", "h");
+    const db = new MemoryAdapter(other.id);
+    const made = await db.createRestaurant(newRestaurant({ name: "Solo Cafe", address: "1 Old St" }));
+    await db.updateRestaurant(made.id, { address: "2 New Ave" });
+    expect((await db.getRestaurant(made.id))?.address).toBe("2 New Ave");
+  });
+});
+
 describe("MemoryAdapter.clearWishlist", () => {
   beforeEach(freshStore);
 

@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   Discovery,
   Household,
+  Nomination,
   Profile,
   Restaurant,
   RestaurantFull,
@@ -62,6 +63,7 @@ type Store = {
   visits: (Visit & { householdId: string })[];
   voteSessions: (VoteSession & { householdId: string })[];
   votes: Vote[];
+  nominations: Nomination[];
   discoveries: (Discovery & { householdId: string })[];
   seenPlaces: { householdId: string; placeId: string }[];
   settings: { householdId: string; value: Settings }[];
@@ -202,6 +204,7 @@ function seedStore(): Store {
     visits,
     voteSessions: [],
     votes: [],
+    nominations: [],
     discoveries: [
       {
         householdId: DEMO_HID,
@@ -396,7 +399,9 @@ export class MemoryAdapter implements DataAdapter {
       s.restaurants.push(catalog);
     }
     const brand = this.ensureBrand(data.name, data.status, data.notes);
-    brand.status = data.status;
+    // adding a location may promote a wishlist brand, but never demotes an
+    // active one back to wishlist (new brands already carry data.status)
+    if (brand.status === "wishlist" && data.status === "active") brand.status = "active";
     if (data.notes) brand.notes = data.notes;
     if (!s.groupRestaurants.some((g) => g.householdId === this.hid && g.restaurantId === catalog!.id)) {
       s.groupRestaurants.push({
@@ -424,10 +429,15 @@ export class MemoryAdapter implements DataAdapter {
       if (row) row.value = value;
       else s.settings.push({ householdId: this.hid, value });
     }
-    // catalog facts only make sense to edit when the brand is a single location
+    // catalog facts only make sense to edit when the brand is a single location,
+    // and only when no OTHER household tracks that location — the catalog row is
+    // shared, so an edit here must never change another family's data
     const links = s.groupRestaurants.filter((g) => g.householdId === this.hid && g.brandId === id);
     if (links.length === 1) {
-      const catalog = s.restaurants.find((r) => r.id === links[0].restaurantId);
+      const sharedElsewhere = s.groupRestaurants.some(
+        (g) => g.restaurantId === links[0].restaurantId && g.householdId !== this.hid
+      );
+      const catalog = sharedElsewhere ? undefined : s.restaurants.find((r) => r.id === links[0].restaurantId);
       if (catalog) {
         if (data.name !== undefined) catalog.name = data.name;
         // never reassign googlePlaceId on an edit (it's the location's identity)
@@ -518,7 +528,7 @@ export class MemoryAdapter implements DataAdapter {
     const catalog = s.restaurants.find((r) => r.id === restaurantId);
     if (!catalog) return "";
     const brand = this.ensureBrand(catalog.name, status, null);
-    brand.status = status;
+    if (brand.status === "wishlist" && status === "active") brand.status = "active";
     if (!s.groupRestaurants.some((g) => g.householdId === this.hid && g.restaurantId === restaurantId)) {
       s.groupRestaurants.push({
         householdId: this.hid,
@@ -627,11 +637,19 @@ export class MemoryAdapter implements DataAdapter {
       .map(stripHid);
   }
 
-  async createVoteSession(candidateIds: string[]): Promise<VoteSession> {
+  /** Starting a new round supersedes any round still in progress. */
+  private supersedeLiveSessions(): void {
     const s = store();
     for (const session of s.voteSessions) {
-      if (session.householdId === this.hid && session.status === "open") session.status = "closed";
+      if (session.householdId === this.hid && session.status !== "closed") {
+        session.status = "closed";
+        session.closedAt = new Date().toISOString();
+      }
     }
+  }
+
+  async createVoteSession(candidateIds: string[]): Promise<VoteSession> {
+    this.supersedeLiveSessions();
     const session = {
       id: randomUUID(),
       householdId: this.hid,
@@ -639,9 +657,65 @@ export class MemoryAdapter implements DataAdapter {
       status: "open" as const,
       candidateIds,
       winnerId: null,
+      closedAt: null,
     };
-    s.voteSessions.push(session);
+    store().voteSessions.push(session);
     return stripHid(session);
+  }
+
+  async createNominationSession(): Promise<VoteSession> {
+    this.supersedeLiveSessions();
+    const session = {
+      id: randomUUID(),
+      householdId: this.hid,
+      createdAt: new Date().toISOString(),
+      status: "nominating" as const,
+      candidateIds: [],
+      winnerId: null,
+      closedAt: null,
+    };
+    store().voteSessions.push(session);
+    return stripHid(session);
+  }
+
+  async getNominatingSession(): Promise<VoteSession | null> {
+    const v = store().voteSessions.find(
+      (x) => x.householdId === this.hid && x.status === "nominating"
+    );
+    return v ? stripHid(v) : null;
+  }
+
+  async listNominations(sessionId: string): Promise<Nomination[]> {
+    if (!this.mySession(sessionId)) return [];
+    return store().nominations.filter((n) => n.sessionId === sessionId);
+  }
+
+  async addNomination(sessionId: string, profileId: string, brandId: string): Promise<void> {
+    const session = this.mySession(sessionId);
+    if (!session || session.status !== "nominating") return;
+    const s = store();
+    const dupe = s.nominations.some(
+      (n) => n.sessionId === sessionId && n.profileId === profileId && n.brandId === brandId
+    );
+    if (dupe) return;
+    s.nominations.push({ sessionId, profileId, brandId, createdAt: new Date().toISOString() });
+  }
+
+  async removeNomination(sessionId: string, profileId: string, brandId: string): Promise<void> {
+    const session = this.mySession(sessionId);
+    if (!session || session.status !== "nominating") return;
+    const s = store();
+    s.nominations = s.nominations.filter(
+      (n) => !(n.sessionId === sessionId && n.profileId === profileId && n.brandId === brandId)
+    );
+  }
+
+  async openVoting(sessionId: string, candidateIds: string[]): Promise<boolean> {
+    const session = this.mySession(sessionId);
+    if (!session || session.status !== "nominating") return false;
+    session.status = "open";
+    session.candidateIds = candidateIds;
+    return true;
   }
 
   private mySession(id: string): (VoteSession & { householdId: string }) | undefined {
@@ -686,12 +760,13 @@ export class MemoryAdapter implements DataAdapter {
     s.votes.push({ sessionId, profileId, pickId, vetoId, deferred });
   }
 
-  async closeVoteSession(sessionId: string, winnerId: string | null): Promise<void> {
+  async closeVoteSession(sessionId: string, winnerId: string | null): Promise<boolean> {
     const session = this.mySession(sessionId);
-    if (session) {
-      session.status = "closed";
-      session.winnerId = winnerId;
-    }
+    if (!session || session.status === "closed") return false;
+    session.status = "closed";
+    session.winnerId = winnerId;
+    session.closedAt = new Date().toISOString();
+    return true;
   }
 
   async listDiscoveries(): Promise<Discovery[]> {

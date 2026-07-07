@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { tallyVotes } from "../lib/vote";
-import { Vote } from "../lib/types";
+import { nominationCandidates, tallyVotes } from "../lib/vote";
+import { Nomination, Vote } from "../lib/types";
 
 function vote(
   profileId: string,
@@ -57,5 +57,39 @@ describe("tallyVotes", () => {
 
   it("handles empty input", () => {
     expect(tallyVotes([], [])).toBeNull();
+  });
+});
+
+function nom(profileId: string, brandId: string, at: string): Nomination {
+  return { sessionId: "s", profileId, brandId, createdAt: at };
+}
+
+describe("nominationCandidates", () => {
+  it("keeps first-nominated order and merges duplicate brands", () => {
+    const noms = [
+      nom("p2", "b", "2026-01-01T10:01:00Z"),
+      nom("p1", "a", "2026-01-01T10:00:00Z"),
+      nom("p3", "a", "2026-01-01T10:02:00Z"),
+    ];
+    const out = nominationCandidates(noms);
+    expect(out.map((c) => c.brandId)).toEqual(["a", "b"]);
+    expect(out[0].nominatorIds).toEqual(["p1", "p3"]);
+    expect(out[1].nominatorIds).toEqual(["p2"]);
+  });
+
+  it("caps how many each person contributes, keeping their oldest", () => {
+    const noms = [
+      nom("p1", "a", "2026-01-01T10:00:00Z"),
+      nom("p1", "b", "2026-01-01T10:01:00Z"),
+      nom("p1", "c", "2026-01-01T10:02:00Z"), // over the cap of 2 — dropped
+      nom("p2", "c", "2026-01-01T10:03:00Z"),
+    ];
+    const out = nominationCandidates(noms, 2);
+    expect(out.map((c) => c.brandId)).toEqual(["a", "b", "c"]);
+    expect(out.find((c) => c.brandId === "c")!.nominatorIds).toEqual(["p2"]);
+  });
+
+  it("handles empty input", () => {
+    expect(nominationCandidates([])).toEqual([]);
   });
 });

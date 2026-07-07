@@ -98,9 +98,19 @@ create table if not exists vote_sessions (
   id uuid primary key default gen_random_uuid(),
   household_id uuid not null references households(id) on delete cascade,
   created_at timestamptz not null default now(),
-  status text not null default 'open' check (status in ('open', 'closed')),
+  status text not null default 'open' check (status in ('nominating', 'open', 'closed')),
   candidate_ids uuid[] not null default '{}',
-  winner_id uuid
+  winner_id uuid,
+  closed_at timestamptz
+);
+
+-- who nominated which brand into a session (the pre-vote 'nominating' phase)
+create table if not exists vote_nominations (
+  session_id uuid not null references vote_sessions(id) on delete cascade,
+  profile_id uuid not null references profiles(id) on delete cascade,
+  brand_id uuid not null references brands(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (session_id, profile_id, brand_id)
 );
 
 create table if not exists votes (
@@ -153,6 +163,7 @@ alter table ratings enable row level security;
 alter table visits enable row level security;
 alter table vote_sessions enable row level security;
 alter table votes enable row level security;
+alter table vote_nominations enable row level security;
 alter table discoveries enable row level security;
 alter table seen_places enable row level security;
 alter table settings enable row level security;

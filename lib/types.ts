@@ -127,7 +127,7 @@ export type Visit = {
   note: string | null;
 };
 
-export type VoteStatus = "open" | "closed";
+export type VoteStatus = "nominating" | "open" | "closed";
 
 export type VoteSession = {
   id: string;
@@ -135,7 +135,18 @@ export type VoteSession = {
   status: VoteStatus;
   candidateIds: string[];
   winnerId: string | null;
+  closedAt: string | null;
 };
+
+export type Nomination = {
+  sessionId: string;
+  profileId: string;
+  brandId: string;
+  createdAt: string;
+};
+
+/** How many places each person may nominate into one round. */
+export const NOMINATIONS_PER_PROFILE = 2;
 
 export type Vote = {
   sessionId: string;

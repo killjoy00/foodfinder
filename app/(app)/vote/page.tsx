@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireProfile } from "@/lib/auth";
 import { db } from "@/lib/data";
+import { NominationPanel } from "@/components/NominationPanel";
 import { QuickVoteStart } from "@/components/QuickVoteStart";
 import { VotePanel, VoteWinnerView } from "@/components/VotePanel";
 
@@ -8,26 +9,53 @@ export const dynamic = "force-dynamic";
 
 export default async function VotePage() {
   const profile = await requireProfile();
-  const session = await (await db()).getOpenVoteSession();
+  const adapter = await db();
+  const session = await adapter.getOpenVoteSession();
 
   if (!session) {
+    // a nomination round in progress takes over the tab
+    const nominating = await adapter.getNominatingSession();
+    if (nominating) {
+      const [nominations, profiles, restaurants] = await Promise.all([
+        adapter.listNominations(nominating.id),
+        adapter.listProfiles(),
+        adapter.listRestaurants(),
+      ]);
+      return (
+        <NominationPanel
+          session={nominating}
+          nominations={nominations}
+          profiles={profiles}
+          restaurants={restaurants}
+          activeProfile={profile}
+        />
+      );
+    }
+
     // a vote that just closed shows its winner for a couple of hours
-    const latest = await (await db()).getLatestVoteSession();
+    const latest = await adapter.getLatestVoteSession();
     if (
       latest?.status === "closed" &&
       latest.winnerId &&
-      Date.now() - new Date(latest.createdAt).getTime() < 2 * 60 * 60 * 1000
+      Date.now() - new Date(latest.closedAt ?? latest.createdAt).getTime() < 2 * 60 * 60 * 1000
     ) {
-      const winner = await (await db()).getRestaurant(latest.winnerId);
+      const winner = await adapter.getRestaurant(latest.winnerId);
       if (winner) {
+        const restaurants = await adapter.listRestaurants();
         return (
-          <div className="pt-4">
+          <div className="flex flex-col gap-6 pt-4">
             <VoteWinnerView winner={winner} />
+            <details className="mx-auto w-full max-w-sm text-center">
+              <summary className="cursor-pointer text-sm text-muted">Start another vote?</summary>
+              <div className="mt-3 flex justify-center">
+                <QuickVoteStart available={restaurants.length} />
+              </div>
+            </details>
           </div>
         );
       }
     }
-    const restaurants = await (await db()).listRestaurants();
+    const restaurants = await adapter.listRestaurants();
     return (
       <div className="flex flex-col items-center gap-4 pt-10 text-center">
         <span className="text-5xl">🗳️</span>
@@ -44,10 +72,11 @@ export default async function VotePage() {
     );
   }
 
-  const [votes, profiles, restaurants] = await Promise.all([
-    (await db()).listVotes(session.id),
-    (await db()).listProfiles(),
-    (await db()).listRestaurants(),
+  const [votes, profiles, restaurants, nominations] = await Promise.all([
+    adapter.listVotes(session.id),
+    adapter.listProfiles(),
+    adapter.listRestaurants(),
+    adapter.listNominations(session.id),
   ]);
   const candidates = session.candidateIds
     .map((id) => restaurants.find((r) => r.id === id))
@@ -60,6 +89,7 @@ export default async function VotePage() {
       profiles={profiles}
       candidates={candidates}
       activeProfile={profile}
+      nominations={nominations}
     />
   );
 }

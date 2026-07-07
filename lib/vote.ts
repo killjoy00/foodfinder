@@ -1,4 +1,4 @@
-import { Vote } from "./types";
+import { Nomination, Vote } from "./types";
 
 /**
  * Tally a family vote. Rules:
@@ -32,4 +32,33 @@ export function tallyVotes(
   const max = Math.max(...counts.values());
   const winners = alive.filter((id) => counts.get(id) === max);
   return winners[Math.floor(rng() * winners.length)] ?? null;
+}
+
+export type NominationCandidate = {
+  brandId: string;
+  nominatorIds: string[]; // in nomination order, deduped
+};
+
+/**
+ * Collapse raw nominations into distinct ballot candidates, in first-nominated
+ * order. Each person contributes at most `capPerProfile` nominations (extras
+ * beyond the cap are dropped, oldest kept); duplicate nominations of the same
+ * brand merge, remembering everyone who proposed it.
+ */
+export function nominationCandidates(
+  nominations: Nomination[],
+  capPerProfile = Infinity
+): NominationCandidate[] {
+  const sorted = [...nominations].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const usedBy = new Map<string, number>();
+  const out = new Map<string, NominationCandidate>();
+  for (const n of sorted) {
+    const used = usedBy.get(n.profileId) ?? 0;
+    if (used >= capPerProfile) continue;
+    usedBy.set(n.profileId, used + 1);
+    const entry = out.get(n.brandId);
+    if (!entry) out.set(n.brandId, { brandId: n.brandId, nominatorIds: [n.profileId] });
+    else if (!entry.nominatorIds.includes(n.profileId)) entry.nominatorIds.push(n.profileId);
+  }
+  return [...out.values()];
 }

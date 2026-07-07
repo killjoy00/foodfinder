@@ -1,6 +1,7 @@
 import {
   Discovery,
   Household,
+  Nomination,
   Profile,
   Restaurant,
   RestaurantFull,
@@ -111,8 +112,18 @@ export interface DataAdapter {
     vetoId: string | null,
     deferred: boolean
   ): Promise<void>;
-  closeVoteSession(sessionId: string, winnerId: string | null): Promise<void>;
+  /** Close a session; returns false when it had already left the open/nominating state (idempotence guard). */
+  closeVoteSession(sessionId: string, winnerId: string | null): Promise<boolean>;
   setDoubleCredits(profileId: string, credits: number): Promise<void>;
+
+  // nomination rounds (a vote session in the 'nominating' phase)
+  createNominationSession(): Promise<VoteSession>;
+  getNominatingSession(): Promise<VoteSession | null>;
+  listNominations(sessionId: string): Promise<Nomination[]>;
+  addNomination(sessionId: string, profileId: string, brandId: string): Promise<void>;
+  removeNomination(sessionId: string, profileId: string, brandId: string): Promise<void>;
+  /** Move a nominating session to open voting with the given ballot; returns false unless it was nominating. */
+  openVoting(sessionId: string, candidateIds: string[]): Promise<boolean>;
 
   // discovery feed
   listDiscoveries(): Promise<Discovery[]>;

@@ -3,7 +3,16 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cancelVoteAction, castVoteAction, closeVoteAction, logVisitAction } from "@/app/actions";
-import { PRICE_LABELS, Profile, RestaurantFull, Vote, VoteSession, daysSince, mapsLink } from "@/lib/types";
+import {
+  Nomination,
+  PRICE_LABELS,
+  Profile,
+  RestaurantFull,
+  Vote,
+  VoteSession,
+  daysSince,
+  mapsLink,
+} from "@/lib/types";
 
 export function VotePanel({
   session,
@@ -11,12 +20,14 @@ export function VotePanel({
   profiles,
   candidates,
   activeProfile,
+  nominations = [],
 }: {
   session: VoteSession;
   votes: Vote[];
   profiles: Profile[];
   candidates: RestaurantFull[];
   activeProfile: Profile;
+  nominations?: Nomination[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -31,6 +42,16 @@ export function VotePanel({
   }, [router]);
 
   const voteByProfile = new Map(votes.map((v) => [v.profileId, v]));
+  const profileById = new Map(profiles.map((p) => [p.id, p]));
+  // when this ballot came from a nomination round, credit the nominators
+  const nominatorsOf = new Map<string, Profile[]>();
+  for (const n of nominations) {
+    const p = profileById.get(n.profileId);
+    if (!p) continue;
+    const arr = nominatorsOf.get(n.brandId) ?? [];
+    if (!arr.some((x) => x.id === p.id)) arr.push(p);
+    nominatorsOf.set(n.brandId, arr);
+  }
   const submitted = !!myVote;
   const iDeferred = myVote?.deferred ?? false;
   const hasDouble = activeProfile.doubleCredits > 0;
@@ -96,6 +117,21 @@ export function VotePanel({
                   {r.cuisines.join(" · ")} · {PRICE_LABELS[r.price - 1]}
                   {days !== null ? ` · ${days}d ago` : " · never been"}
                 </p>
+                {(nominatorsOf.get(r.id) ?? []).length > 0 && (
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-muted">
+                    <span>nominated by</span>
+                    {(nominatorsOf.get(r.id) ?? []).map((p) => (
+                      <span
+                        key={p.id}
+                        className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px]"
+                        style={{ backgroundColor: p.color }}
+                        title={p.name}
+                      >
+                        {p.emoji}
+                      </span>
+                    ))}
+                  </p>
+                )}
               </button>
               <a
                 href={mapsLink(r)}

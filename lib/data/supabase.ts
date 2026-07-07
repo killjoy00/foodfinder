@@ -3,6 +3,7 @@ import {
   DEFAULT_SETTINGS,
   Discovery,
   Household,
+  Nomination,
   Profile,
   Restaurant,
   RestaurantFull,
@@ -99,6 +100,7 @@ function rowToSession(row: Row): VoteSession {
     status: row.status,
     candidateIds: row.candidate_ids ?? [],
     winnerId: row.winner_id,
+    closedAt: row.closed_at ?? null,
   };
 }
 
@@ -355,23 +357,23 @@ export class SupabaseAdapter implements DataAdapter {
     return full ?? null;
   }
 
-  /** Find or create the brand for a name within this household; returns its id. */
-  private async ensureBrandId(
+  /** Find or create the brand for a name within this household. */
+  private async ensureBrand(
     name: string,
     status: "active" | "wishlist",
     notes: string | null
-  ): Promise<string> {
+  ): Promise<{ id: string; status: "active" | "wishlist" }> {
     const key = brandKey(name);
     const existing = await unwrap(
       this.client
         .from("brands")
-        .select("id")
+        .select("id, status")
         .eq("household_id", this.hid)
         .eq("brand_key", key)
         .limit(1)
         .maybeSingle()
     );
-    if (existing) return existing.id;
+    if (existing) return { id: existing.id, status: existing.status };
     const row = (await unwrap(
       this.client
         .from("brands")
@@ -379,7 +381,7 @@ export class SupabaseAdapter implements DataAdapter {
         .select("id")
         .single()
     )) as Row;
-    return row.id;
+    return { id: row.id, status };
   }
 
   // Reuse a catalog row only for the same Google place — never by name, so
@@ -408,10 +410,16 @@ export class SupabaseAdapter implements DataAdapter {
       catalog = rowToCatalog(row);
       catalogId = catalog.id;
     }
-    const brandId = await this.ensureBrandId(data.name, data.status, data.notes);
-    const brandPatch: Row = { status: data.status };
+    const brand = await this.ensureBrand(data.name, data.status, data.notes);
+    const brandId = brand.id;
+    // adding a location may promote a wishlist brand, but never demotes an
+    // active one back to wishlist (new brands already carry data.status)
+    const brandPatch: Row = {};
+    if (brand.status === "wishlist" && data.status === "active") brandPatch.status = "active";
     if (data.notes) brandPatch.notes = data.notes;
-    await unwrap(this.client.from("brands").update(brandPatch).eq("id", brandId).eq("household_id", this.hid));
+    if (Object.keys(brandPatch).length) {
+      await unwrap(this.client.from("brands").update(brandPatch).eq("id", brandId).eq("household_id", this.hid));
+    }
     await unwrap(
       this.client.from("group_restaurants").upsert(
         { household_id: this.hid, restaurant_id: catalogId, brand_id: brandId },
@@ -419,7 +427,8 @@ export class SupabaseAdapter implements DataAdapter {
       )
     );
     // id is the brand id so callers land on the brand entry
-    return { ...catalog, id: brandId, status: data.status, notes: data.notes };
+    const status = brandPatch.status ?? brand.status;
+    return { ...catalog, id: brandId, status, notes: data.notes };
   }
 
   async updateRestaurant(id: string, data: Partial<NewRestaurant>): Promise<void> {
@@ -445,6 +454,18 @@ export class SupabaseAdapter implements DataAdapter {
       this.client.from("group_restaurants").select("restaurant_id").eq("household_id", this.hid).eq("brand_id", id)
     );
     if ((links ?? []).length === 1 && hasCatalogChange(data)) {
+      // the catalog row is shared across groups: only write it down when no
+      // OTHER household tracks this location, so one family's edit can never
+      // change another family's data
+      const others = await unwrap(
+        this.client
+          .from("group_restaurants")
+          .select("household_id")
+          .eq("restaurant_id", links![0].restaurant_id)
+          .neq("household_id", this.hid)
+          .limit(1)
+      );
+      if ((others ?? []).length > 0) return;
       const patch = catalogToRow(data);
       delete patch.cuisines; // cuisines are a per-family brand override, not a catalog edit
       // never reassign a location's Google place id on an edit: it's the row's
@@ -584,8 +605,11 @@ export class SupabaseAdapter implements DataAdapter {
       this.client.from("restaurants").select("name").eq("id", restaurantId).maybeSingle()
     );
     if (!cat) return "";
-    const brandId = await this.ensureBrandId(cat.name, status, null);
-    await unwrap(this.client.from("brands").update({ status }).eq("id", brandId).eq("household_id", this.hid));
+    const brand = await this.ensureBrand(cat.name, status, null);
+    const brandId = brand.id;
+    if (brand.status === "wishlist" && status === "active") {
+      await unwrap(this.client.from("brands").update({ status }).eq("id", brandId).eq("household_id", this.hid));
+    }
     await unwrap(
       this.client.from("group_restaurants").upsert(
         { household_id: this.hid, restaurant_id: restaurantId, brand_id: brandId },
@@ -729,14 +753,19 @@ export class SupabaseAdapter implements DataAdapter {
     return (rows ?? []).map(rowToVisit);
   }
 
-  async createVoteSession(candidateIds: string[]): Promise<VoteSession> {
+  /** Starting a new round supersedes any round still in progress. */
+  private async supersedeLiveSessions(): Promise<void> {
     await unwrap(
       this.client
         .from("vote_sessions")
-        .update({ status: "closed" })
+        .update({ status: "closed", closed_at: new Date().toISOString() })
         .eq("household_id", this.hid)
-        .eq("status", "open")
+        .neq("status", "closed")
     );
+  }
+
+  async createVoteSession(candidateIds: string[]): Promise<VoteSession> {
+    await this.supersedeLiveSessions();
     const row = await unwrap(
       this.client
         .from("vote_sessions")
@@ -745,6 +774,83 @@ export class SupabaseAdapter implements DataAdapter {
         .single()
     );
     return rowToSession(row);
+  }
+
+  async createNominationSession(): Promise<VoteSession> {
+    await this.supersedeLiveSessions();
+    const row = await unwrap(
+      this.client
+        .from("vote_sessions")
+        .insert({ household_id: this.hid, status: "nominating", candidate_ids: [] })
+        .select()
+        .single()
+    );
+    return rowToSession(row);
+  }
+
+  async getNominatingSession(): Promise<VoteSession | null> {
+    const row = await unwrap(
+      this.client
+        .from("vote_sessions")
+        .select("*")
+        .eq("household_id", this.hid)
+        .eq("status", "nominating")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
+    return row ? rowToSession(row) : null;
+  }
+
+  async listNominations(sessionId: string): Promise<Nomination[]> {
+    if (!(await this.getVoteSession(sessionId))) return [];
+    const rows = await unwrap(
+      this.client.from("vote_nominations").select("*").eq("session_id", sessionId)
+    );
+    return (rows ?? []).map((r: Row) => ({
+      sessionId: r.session_id,
+      profileId: r.profile_id,
+      brandId: r.brand_id,
+      createdAt: r.created_at,
+    }));
+  }
+
+  async addNomination(sessionId: string, profileId: string, brandId: string): Promise<void> {
+    const session = await this.getVoteSession(sessionId);
+    if (!session || session.status !== "nominating") return;
+    await unwrap(
+      this.client.from("vote_nominations").upsert(
+        { session_id: sessionId, profile_id: profileId, brand_id: brandId },
+        { onConflict: "session_id,profile_id,brand_id", ignoreDuplicates: true }
+      )
+    );
+  }
+
+  async removeNomination(sessionId: string, profileId: string, brandId: string): Promise<void> {
+    const session = await this.getVoteSession(sessionId);
+    if (!session || session.status !== "nominating") return;
+    await unwrap(
+      this.client
+        .from("vote_nominations")
+        .delete()
+        .eq("session_id", sessionId)
+        .eq("profile_id", profileId)
+        .eq("brand_id", brandId)
+    );
+  }
+
+  async openVoting(sessionId: string, candidateIds: string[]): Promise<boolean> {
+    // conditional update: only a still-nominating session can open for voting
+    const rows = await unwrap(
+      this.client
+        .from("vote_sessions")
+        .update({ status: "open", candidate_ids: candidateIds })
+        .eq("id", sessionId)
+        .eq("household_id", this.hid)
+        .eq("status", "nominating")
+        .select("id")
+    );
+    return (rows ?? []).length > 0;
   }
 
   async getOpenVoteSession(): Promise<VoteSession | null> {
@@ -814,14 +920,19 @@ export class SupabaseAdapter implements DataAdapter {
     );
   }
 
-  async closeVoteSession(sessionId: string, winnerId: string | null): Promise<void> {
-    await unwrap(
+  async closeVoteSession(sessionId: string, winnerId: string | null): Promise<boolean> {
+    // conditional update so two concurrent closes can't both "win" (only the
+    // one that flips the status settles defer credits in the action layer)
+    const rows = await unwrap(
       this.client
         .from("vote_sessions")
-        .update({ status: "closed", winner_id: winnerId })
+        .update({ status: "closed", winner_id: winnerId, closed_at: new Date().toISOString() })
         .eq("id", sessionId)
         .eq("household_id", this.hid)
+        .neq("status", "closed")
+        .select("id")
     );
+    return (rows ?? []).length > 0;
   }
 
   async listDiscoveries(): Promise<Discovery[]> {
