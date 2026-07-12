@@ -29,6 +29,15 @@ member, and let a weighted spin wheel settle "where should we eat tonight?"
 - **PWA** — installs to phone home screens like a native app.
 - **Deep links** — Google Maps and OpenTable from every result.
 
+## iPhone app 📱
+
+**[mobile/](mobile/GETTING-STARTED.md)** is a native iPhone app (Expo /
+React Native) for the same data — same groups, profiles, wheel, and votes,
+talking to your deployed site through `app/api/mobile/*`. Test it on your
+phone in minutes with Expo Go, ship it via TestFlight/App Store with EAS
+cloud builds — no Mac needed. See
+**[mobile/GETTING-STARTED.md](mobile/GETTING-STARTED.md)**.
+
 ## Running it
 
 ```bash

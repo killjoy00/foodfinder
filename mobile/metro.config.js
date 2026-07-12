@@ -13,8 +13,10 @@ config.watchFolders = [repoRoot];
 config.resolver.unstable_onDemandFilesystem = false;
 // prefer the app's own dependency tree over the Next.js app's; the shared
 // ../lib modules are pure TypeScript with no npm imports, so nothing else
-// from the web app's node_modules can leak in
+// from the web app's node_modules can leak in — and block that tree
+// outright so a stray import fails loudly instead of double-bundling react
 config.resolver.nodeModulesPaths = [path.resolve(projectRoot, "node_modules")];
+config.resolver.blockList = [new RegExp(`^${repoRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/node_modules/.*`)];
 
 // @shared/* → ../lib/* (mirrors the tsconfig paths entry, which Metro
 // can't apply on its own for folders outside the project root)
