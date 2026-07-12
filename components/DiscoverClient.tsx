@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import {
-  RecommendationGroup,
   addDiscoveryToWishlistAction,
   addRecommendationToWishlistAction,
   dismissDiscoveryAction,
   fetchRecommendationsAction,
   runSweepAction,
 } from "@/app/actions";
+import type { RecommendationGroup } from "@/lib/services";
 import { Discovery } from "@/lib/types";
 import { formatMiles } from "@/lib/distance";
 import { Segmented } from "./ui";

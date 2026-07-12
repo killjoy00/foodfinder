@@ -1,37 +1,35 @@
-import { createHmac } from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import { signHouseholdToken, verifyHouseholdToken } from "./token";
 
 const HOUSEHOLD_COOKIE = "ff_household";
 const MAX_AGE = 60 * 60 * 24 * 365; // a year
 
-function secret(): string {
-  return process.env.AUTH_SECRET || process.env.CRON_SECRET || "foodfinder-dev-secret";
-}
-
-/** Sign the household id so a user can't swap their cookie to another group. */
-function sign(id: string): string {
-  const sig = createHmac("sha256", secret()).update(id).digest("hex").slice(0, 32);
-  return `${id}.${sig}`;
-}
-
-function verify(token: string): string | null {
-  const dot = token.lastIndexOf(".");
-  if (dot < 0) return null;
-  const id = token.slice(0, dot);
-  const sig = token.slice(dot + 1);
-  const expect = createHmac("sha256", secret()).update(id).digest("hex").slice(0, 32);
-  return sig === expect ? id : null;
-}
-
+/**
+ * The logged-in group for this request. Web clients carry the signed token
+ * in a cookie; the mobile app sends the same token as a bearer header.
+ */
 export async function getActiveHouseholdId(): Promise<string | null> {
   const jar = await cookies();
-  const token = jar.get(HOUSEHOLD_COOKIE)?.value;
-  return token ? verify(token) : null;
+  const cookieToken = jar.get(HOUSEHOLD_COOKIE)?.value;
+  if (cookieToken) {
+    const id = verifyHouseholdToken(cookieToken);
+    if (id) return id;
+  }
+  const auth = (await headers()).get("authorization");
+  if (auth?.startsWith("Bearer ")) {
+    return verifyHouseholdToken(auth.slice("Bearer ".length).trim());
+  }
+  return null;
 }
 
 export async function setActiveHousehold(id: string): Promise<void> {
   const jar = await cookies();
-  jar.set(HOUSEHOLD_COOKIE, sign(id), { httpOnly: true, sameSite: "lax", maxAge: MAX_AGE, path: "/" });
+  jar.set(HOUSEHOLD_COOKIE, signHouseholdToken(id), {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: MAX_AGE,
+    path: "/",
+  });
 }
 
 export async function clearActiveHousehold(): Promise<void> {
