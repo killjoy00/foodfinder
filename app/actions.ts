@@ -14,21 +14,23 @@ import {
 import { db } from "@/lib/data";
 import { CatalogInput, NewRestaurant } from "@/lib/data/adapter";
 import {
-  DEFAULT_FILTERS,
-  DEFAULT_VOTE_SIZE,
-  buildCandidates,
-  buildCuisineRecency,
-  collapseChains,
-  sampleCandidates,
-} from "@/lib/picker";
-import { geocodeAddress, zipToCoords } from "@/lib/geocode";
-import { distanceMiles } from "@/lib/distance";
-import { findRecommendations } from "@/lib/recommend";
-import { placesKey } from "@/lib/places";
+  RecommendationGroup,
+  RecommendationPick,
+  addDiscoveryToWishlist,
+  addRecommendationToWishlist,
+  castVote,
+  closeVote,
+  ensureCoords,
+  fetchRecommendationGroups,
+  importTakeout,
+  logVisit,
+  saveHomeLocation,
+  startQuickVote,
+  trackRestaurantWithGeocode,
+} from "@/lib/services";
 import { runDiscoverySweep, SweepResult } from "@/lib/sweep";
-import { TakeoutItem, starToScore } from "@/lib/takeout";
-import { tallyVotes } from "@/lib/vote";
-import { RestaurantStatus, Settings, VisitMode } from "@/lib/types";
+import { TakeoutItem } from "@/lib/takeout";
+import { RestaurantStatus, VisitMode } from "@/lib/types";
 
 // ---------- auth & profiles ----------
 
@@ -142,17 +144,6 @@ function restaurantFromForm(formData: FormData): NewRestaurant {
   };
 }
 
-/** Fill in coordinates from the address when they're missing or the address changed. */
-async function ensureCoords(data: NewRestaurant, prevAddress?: string | null): Promise<NewRestaurant> {
-  const hasCoords = data.lat !== null && data.lng !== null;
-  const addressChanged = prevAddress !== undefined && data.address !== (prevAddress ?? null);
-  if (data.address && (!hasCoords || addressChanged)) {
-    const point = await geocodeAddress(data.address);
-    if (point) return { ...data, lat: point.lat, lng: point.lng };
-  }
-  return data;
-}
-
 export async function addRestaurantAction(formData: FormData): Promise<void> {
   await requireProfile();
   const data = await ensureCoords(restaurantFromForm(formData));
@@ -195,15 +186,7 @@ export async function trackRestaurantAction(
   status: RestaurantStatus
 ): Promise<void> {
   await requireProfile();
-  const adapter = await db();
-  await adapter.trackRestaurant(restaurantId, status);
-  // catalog seeds (e.g. the Austin list) carry no coordinates; geocode the
-  // location on add so the family's distance filtering works
-  const loc = await adapter.getCatalogLocation(restaurantId);
-  if (loc && (loc.lat === null || loc.lng === null) && loc.address) {
-    const point = await geocodeAddress(loc.address);
-    if (point) await adapter.setLocationCoords(restaurantId, point.lat, point.lng);
-  }
+  await trackRestaurantWithGeocode(await db(), restaurantId, status);
   revalidatePath("/restaurants");
   revalidatePath("/restaurants/browse");
   revalidatePath("/");
@@ -270,12 +253,7 @@ export async function logVisitAction(
   note?: string
 ): Promise<void> {
   await requireProfile();
-  await (await db()).addVisit(restaurantId, new Date().toISOString(), mode, note?.trim() || null);
-  // A visit means it's no longer just a wish.
-  const restaurant = await (await db()).getRestaurant(restaurantId);
-  if (restaurant?.status === "wishlist") {
-    await (await db()).updateRestaurant(restaurantId, { status: "active" });
-  }
+  await logVisit(await db(), restaurantId, mode, note);
   revalidatePath("/");
   revalidatePath("/restaurants");
   revalidatePath(`/restaurants/${restaurantId}`);
@@ -297,21 +275,7 @@ export async function startVoteAction(candidateIds: string[]): Promise<void> {
  */
 export async function startQuickVoteAction(count: number): Promise<void> {
   await requireProfile();
-  const size = Math.min(8, Math.max(2, Math.round(count) || DEFAULT_VOTE_SIZE));
-  const [restaurants, recentVisits] = await Promise.all([
-    (await db()).listRestaurants(),
-    (await db()).listRecentVisits(50),
-  ]);
-  const cuisinesByRestaurant = new Map(restaurants.map((r) => [r.id, r.cuisines]));
-  const cuisineRecency = buildCuisineRecency(recentVisits, cuisinesByRestaurant);
-  const { regulars, wishlist } = buildCandidates(
-    collapseChains(restaurants),
-    DEFAULT_FILTERS,
-    cuisineRecency
-  );
-  const candidates = sampleCandidates([...regulars, ...wishlist], size);
-  if (candidates.length < 2) return;
-  await (await db()).createVoteSession(candidates.map((c) => c.restaurant.id));
+  await startQuickVote(await db(), count);
   revalidatePath("/vote");
 }
 
@@ -322,42 +286,13 @@ export async function castVoteAction(
   deferred: boolean = false
 ): Promise<void> {
   const profile = await requireProfile();
-  const adapter = await db();
-  const session = await adapter.getVoteSession(sessionId);
-  if (!session || session.status !== "open") return;
-  // deferral is final for the round — once you defer you're out, no take-backs
-  const mine = (await adapter.listVotes(sessionId)).find((v) => v.profileId === profile.id);
-  if (mine?.deferred) return;
-  if (deferred) {
-    await adapter.castVote(sessionId, profile.id, null, null, true);
-  } else {
-    if (pickId && vetoId && pickId === vetoId) return;
-    await adapter.castVote(sessionId, profile.id, pickId, vetoId, false);
-  }
+  await castVote(await db(), profile.id, sessionId, pickId, vetoId, deferred);
   revalidatePath("/vote");
 }
 
 export async function closeVoteAction(sessionId: string): Promise<void> {
   await requireProfile();
-  const session = await (await db()).getVoteSession(sessionId);
-  if (!session || session.status !== "open") return;
-  const [votes, profiles] = await Promise.all([(await db()).listVotes(sessionId), (await db()).listProfiles()]);
-
-  // a banked double-vote credit makes this round's pick count twice
-  const creditOf = new Map(profiles.map((p) => [p.id, p.doubleCredits]));
-  const weightOf = (profileId: string) => ((creditOf.get(profileId) ?? 0) > 0 ? 2 : 1);
-  const winnerId = tallyVotes(session.candidateIds, votes, Math.random, weightOf);
-  await (await db()).closeVoteSession(sessionId, winnerId);
-
-  // settle credits: bank one per deferral, spend one when a credit was used
-  for (const v of votes) {
-    const credits = creditOf.get(v.profileId) ?? 0;
-    if (v.deferred) {
-      await (await db()).setDoubleCredits(v.profileId, credits + 1);
-    } else if (v.pickId && credits > 0) {
-      await (await db()).setDoubleCredits(v.profileId, credits - 1);
-    }
-  }
+  await closeVote(await db(), sessionId);
   revalidatePath("/vote");
 }
 
@@ -377,25 +312,7 @@ export async function dismissDiscoveryAction(placeId: string): Promise<void> {
 
 export async function addDiscoveryToWishlistAction(placeId: string): Promise<void> {
   await requireProfile();
-  const discoveries = await (await db()).listDiscoveries();
-  const d = discoveries.find((x) => x.placeId === placeId);
-  if (!d) return;
-  const point = d.address ? await geocodeAddress(d.address) : null;
-  await (await db()).createRestaurant({
-    name: d.name,
-    cuisines: [],
-    price: 2,
-    address: d.address,
-    lat: point?.lat ?? null,
-    lng: point?.lng ?? null,
-    googlePlaceId: d.placeId,
-    mapsUrl: d.mapsUrl,
-    reserveUrl: null,
-    tags: [],
-    status: "wishlist",
-    notes: "From the discovery feed",
-  });
-  await (await db()).dismissDiscovery(placeId);
+  await addDiscoveryToWishlist(await db(), placeId);
   revalidatePath("/discover");
   revalidatePath("/restaurants");
 }
@@ -407,82 +324,16 @@ export async function runSweepAction(): Promise<SweepResult> {
   return result;
 }
 
-export type RecommendationGroup = {
-  cuisine: string;
-  places: {
-    placeId: string;
-    name: string;
-    address: string | null;
-    rating: number | null;
-    mapsUrl: string | null;
-    lat: number | null;
-    lng: number | null;
-    distanceMiles: number | null;
-  }[];
-};
-
 export async function fetchRecommendationsAction(radiusMiles?: number): Promise<
   { ok: true; groups: RecommendationGroup[] } | { ok: false; error: string }
 > {
   await requireProfile();
-  const key = placesKey();
-  if (!key) return { ok: false, error: "GOOGLE_PLACES_API_KEY is not set" };
-  const settings = await (await db()).getSettings();
-  if (settings.homeLat === null || settings.homeLng === null) {
-    return { ok: false, error: "Set your home location in Settings first." };
-  }
-  // a per-search radius overrides the saved default when provided
-  const radiusMeters =
-    radiusMiles && radiusMiles > 0
-      ? Math.round(Math.min(radiusMiles, 50) * 1609.34)
-      : settings.radiusMeters;
-  const restaurants = await (await db()).listRestaurants();
-  const home = { lat: settings.homeLat, lng: settings.homeLng };
-  try {
-    const raw = await findRecommendations(restaurants, { ...home, radiusMeters }, key);
-    const groups: RecommendationGroup[] = raw.map((g) => ({
-      cuisine: g.cuisine,
-      places: g.places.map((p) => ({
-        placeId: p.placeId,
-        name: p.name,
-        address: p.address,
-        rating: p.rating,
-        mapsUrl: p.mapsUrl,
-        lat: p.lat,
-        lng: p.lng,
-        distanceMiles: distanceMiles(home, { lat: p.lat, lng: p.lng }),
-      })),
-    }));
-    return { ok: true, groups };
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "Recommendation lookup failed" };
-  }
+  return fetchRecommendationGroups(await db(), radiusMiles);
 }
 
-export async function addRecommendationToWishlistAction(place: {
-  placeId: string;
-  name: string;
-  address: string | null;
-  mapsUrl: string | null;
-  cuisine: string;
-  lat: number | null;
-  lng: number | null;
-}): Promise<void> {
+export async function addRecommendationToWishlistAction(place: RecommendationPick): Promise<void> {
   await requireProfile();
-  await (await db()).createRestaurant({
-    name: place.name,
-    cuisines: place.cuisine ? [place.cuisine] : [],
-    price: 2,
-    address: place.address,
-    lat: place.lat,
-    lng: place.lng,
-    googlePlaceId: place.placeId,
-    mapsUrl: place.mapsUrl,
-    reserveUrl: null,
-    tags: [],
-    status: "wishlist",
-    notes: "Recommended based on your ratings",
-  });
+  await addRecommendationToWishlist(await db(), place);
   revalidatePath("/restaurants");
 }
 
@@ -492,42 +343,9 @@ export async function importTakeoutAction(
   items: TakeoutItem[]
 ): Promise<{ imported: number; skipped: number }> {
   const profile = await requireProfile();
-  const existing = await (await db()).listRestaurants();
-  const knownIds = new Set(existing.map((r) => r.googlePlaceId).filter(Boolean));
-  const knownNames = new Set(existing.map((r) => r.name.toLowerCase()));
-
-  let imported = 0;
-  let skipped = 0;
-  for (const item of items.slice(0, 500)) {
-    const dupe =
-      (item.placeId && knownIds.has(item.placeId)) || knownNames.has(item.name.toLowerCase());
-    if (dupe || !item.name) {
-      skipped++;
-      continue;
-    }
-    const created = await (await db()).createRestaurant({
-      name: item.name,
-      cuisines: [],
-      price: 2,
-      address: item.address,
-      lat: item.lat,
-      lng: item.lng,
-      googlePlaceId: item.placeId,
-      mapsUrl: item.mapsUrl,
-      reserveUrl: null,
-      tags: [],
-      status: item.kind === "review" ? "active" : "wishlist",
-      notes: null,
-    });
-    if (item.starRating !== null) {
-      await (await db()).setRating(created.id, profile.id, starToScore(item.starRating));
-    }
-    knownNames.add(item.name.toLowerCase());
-    if (item.placeId) knownIds.add(item.placeId);
-    imported++;
-  }
+  const result = await importTakeout(await db(), profile.id, items);
   revalidatePath("/restaurants");
-  return { imported, skipped };
+  return result;
 }
 
 // ---------- settings ----------
@@ -541,34 +359,16 @@ export async function saveLocationAction(
     const v = parseFloat(String(formData.get(name) ?? ""));
     return Number.isFinite(v) ? v : null;
   };
-  const radiusMeters = Math.round(((num("radiusMiles") ?? 5) * 1609.34) || 8000);
-  const zip = String(formData.get("zip") ?? "").trim();
-  const manualLat = num("homeLat");
-  const manualLng = num("homeLng");
-
-  const adapter = await db();
-  const prev = await adapter.getSettings(); // preserve cuisineOverrides etc.
-  let settings: Settings;
-  if (zip) {
-    const hit = await zipToCoords(zip);
-    if (!hit) {
-      return { ok: false, message: `Couldn't find ZIP code "${zip}" — double-check it?` };
-    }
-    settings = { ...prev, homeLabel: `${hit.label} (${zip})`, homeLat: hit.lat, homeLng: hit.lng, radiusMeters };
-  } else if (manualLat !== null && manualLng !== null) {
-    settings = {
-      ...prev,
-      homeLabel: String(formData.get("homeLabel") ?? "").trim() || "Home",
-      homeLat: manualLat,
-      homeLng: manualLng,
-      radiusMeters,
-    };
-  } else {
-    return { ok: false, message: "Enter a ZIP code (or coordinates under Advanced)." };
+  const result = await saveHomeLocation(await db(), {
+    zip: String(formData.get("zip") ?? ""),
+    homeLabel: String(formData.get("homeLabel") ?? ""),
+    homeLat: num("homeLat"),
+    homeLng: num("homeLng"),
+    radiusMiles: num("radiusMiles"),
+  });
+  if (result.ok) {
+    revalidatePath("/settings");
+    revalidatePath("/discover");
   }
-
-  await adapter.saveSettings(settings);
-  revalidatePath("/settings");
-  revalidatePath("/discover");
-  return { ok: true, message: `Home set to ${settings.homeLabel} ✓` };
+  return result;
 }

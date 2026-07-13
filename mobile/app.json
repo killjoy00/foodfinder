@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "FoodFinder",
+    "slug": "foodfinder",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "foodfinder",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0c0a09",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mindellfamily.foodfinder",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Your location powers the \"near me now\" filter so the wheel only picks places you can actually get to."
+      }
+    },
+    "android": {
+      "package": "com.mindellfamily.foodfinder",
+      "adaptiveIcon": {
+        "backgroundColor": "#0c0a09",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "experiments": {
+      "onDemandFilesystem": "UNSTABLE_ALLOW_ALL"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Your location powers the \"near me now\" filter so the wheel only picks places you can actually get to."
+        }
+      ]
+    ]
+  }
+}

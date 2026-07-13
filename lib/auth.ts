@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DEMO_HOUSEHOLD_ID, db, isDemoMode, registry } from "./data";
 import {
@@ -10,9 +10,11 @@ import {
 import { Household, Profile } from "./types";
 
 const PROFILE_COOKIE = "ff_profile";
+/** Mobile clients send their chosen profile per-request instead of a cookie. */
+export const PROFILE_HEADER = "x-ff-profile";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
-function passwordHash(password: string): string {
+export function passwordHash(password: string): string {
   return createHash("sha256").update(`foodfinder:${password}`).digest("hex");
 }
 
@@ -100,7 +102,7 @@ export async function clearActiveProfile(): Promise<void> {
 
 export async function getActiveProfile(): Promise<Profile | null> {
   const jar = await cookies();
-  const id = jar.get(PROFILE_COOKIE)?.value;
+  const id = jar.get(PROFILE_COOKIE)?.value ?? (await headers()).get(PROFILE_HEADER);
   if (!id) return null;
   // scoped to the active household, so a foreign profile id won't resolve
   const profiles = await (await db()).listProfiles();
