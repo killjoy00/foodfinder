@@ -28,6 +28,9 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "experiments": {
       "onDemandFilesystem": "UNSTABLE_ALLOW_ALL"
     },
