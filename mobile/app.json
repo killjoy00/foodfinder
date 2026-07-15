@@ -6,14 +6,18 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "foodfinder",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0c0a09",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.mindellfamily.foodfinder",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Your location powers the \"near me now\" filter so the wheel only picks places you can actually get to."
+        "NSLocationWhenInUseUsageDescription": "Your location powers the \"near me now\" filter so the wheel only picks places you can actually get to.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
