@@ -13,6 +13,9 @@ export default function RootLayout() {
           headerTintColor: colors.foreground,
           headerTitleStyle: { fontWeight: "700" },
           contentStyle: { backgroundColor: colors.background },
+          // Show just the back chevron; the (tabs) group has no title, so a
+          // text label would fall back to the route name ("Tabs").
+          headerBackButtonDisplayMode: "minimal",
         }}
       >
         <Stack.Screen name="index" options={{ headerShown: false }} />
