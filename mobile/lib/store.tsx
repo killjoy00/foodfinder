@@ -26,8 +26,12 @@ const KEYS = {
   profile: "ff_profile_id",
 } as const;
 
-/** Default server URL; override on the login screen or via EXPO_PUBLIC_API_URL. */
-const DEFAULT_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
+/**
+ * Default server URL. Baked in so family members never type it; the login
+ * screen hides the server field whenever this is set (with a "change" link
+ * to override). EXPO_PUBLIC_API_URL still wins if provided at build time.
+ */
+const DEFAULT_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? "https://foodfinder.planitnow.us";
 
 type AppState = {
   ready: boolean; // secure-store hydration finished
