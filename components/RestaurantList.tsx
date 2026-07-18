@@ -220,10 +220,18 @@ export function RestaurantList({
           );
         })}
         {shown.length === 0 && (
-          <li className="rounded-2xl border border-dashed border-border-soft p-8 text-center text-muted">
+          <li className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border-soft p-8 text-center text-muted">
             {view === "wishlist"
               ? "Nothing on the wishlist yet. Add places you want to try!"
               : "No matches. Add your first restaurant with the + Add button."}
+            {restaurants.length === 0 && (
+              <Link
+                href="/start"
+                className="rounded-xl bg-accent px-4 py-2.5 font-bold text-black"
+              >
+                🚀 Getting started
+              </Link>
+            )}
           </li>
         )}
       </ul>

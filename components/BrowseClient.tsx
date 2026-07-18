@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { trackRestaurantAction } from "@/app/actions";
+import { trackRestaurantAction, trackRestaurantsBulkAction } from "@/app/actions";
 import { CatalogEntry } from "@/lib/data/adapter";
 import { PRICE_LABELS } from "@/lib/types";
 import { LatLng, distanceMiles, formatMiles } from "@/lib/distance";
@@ -74,6 +74,24 @@ export function BrowseClient({
     startTransition(async () => {
       await trackRestaurantAction(id, status);
       setDone((prev) => ({ ...prev, [id]: status }));
+    });
+  }
+
+  // every un-tracked result of the current search/filters, for the bulk add
+  const bulkIds = useMemo(
+    () => shown.filter(({ c }) => !c.tracked && !done[c.id]).map(({ c }) => c.id),
+    [shown, done]
+  );
+
+  function addAllShown() {
+    const ids = bulkIds;
+    startTransition(async () => {
+      await trackRestaurantsBulkAction(ids, "wishlist");
+      setDone((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = "wishlist";
+        return next;
+      });
     });
   }
 
@@ -170,11 +188,22 @@ export function BrowseClient({
         </select>
       )}
 
-      <p className="text-xs text-muted">
-        {shown.length === 0
-          ? "0 shown"
-          : `Showing ${Math.min(limit, shown.length)} of ${shown.length}`}
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted">
+          {shown.length === 0
+            ? "0 shown"
+            : `Showing ${Math.min(limit, shown.length)} of ${shown.length}`}
+        </p>
+        {bulkIds.length > 1 && (
+          <button
+            disabled={pending}
+            onClick={addAllShown}
+            className="rounded-lg bg-surface-2 px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+          >
+            {pending ? "Adding…" : `⭐ Add all ${bulkIds.length} shown to wishlist`}
+          </button>
+        )}
+      </div>
 
       <ul className="flex flex-col gap-2">
         {shown.slice(0, limit).map(({ c, dist }) => (

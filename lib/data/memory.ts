@@ -235,6 +235,36 @@ function stripHid<T extends { householdId: string }>(row: T): Omit<T, "household
 
 export const DEMO_HOUSEHOLD_ID = DEMO_HID;
 
+/** Bulk-add rows to the shared catalog, skipping dupes; shared by the family import and the admin console. */
+function addCatalogRowsToStore(entries: import("./adapter").CatalogInput[]): number {
+  const s = store();
+  let added = 0;
+  for (const e of entries) {
+    const dupe = s.restaurants.find(
+      (c) =>
+        (e.googlePlaceId && c.googlePlaceId === e.googlePlaceId) ||
+        c.name.trim().toLowerCase() === e.name.trim().toLowerCase()
+    );
+    if (dupe) continue;
+    s.restaurants.push({
+      id: randomUUID(),
+      name: e.name,
+      cuisines: e.cuisines,
+      price: e.price,
+      address: e.address,
+      lat: e.lat,
+      lng: e.lng,
+      googlePlaceId: e.googlePlaceId,
+      mapsUrl: e.mapsUrl,
+      reserveUrl: null,
+      tags: [],
+      createdAt: new Date().toISOString(),
+    });
+    added++;
+  }
+  return added;
+}
+
 export class MemoryRegistry implements HouseholdRegistry {
   async createHousehold(name: string, passwordHash: string): Promise<Household> {
     const row: HouseholdRow = {
@@ -260,6 +290,109 @@ export class MemoryRegistry implements HouseholdRegistry {
   async setHouseholdPassword(id: string, passwordHash: string): Promise<void> {
     const h = store().households.find((x) => x.id === id);
     if (h) h.passwordHash = passwordHash;
+  }
+
+  // ---------- admin console (cross-tenant) ----------
+
+  async listHouseholdSummaries(): Promise<import("./adapter").AdminHouseholdSummary[]> {
+    const s = store();
+    return s.households.map((h) => {
+      const profiles = s.profiles.filter((p) => p.householdId === h.id);
+      const visits = s.visits
+        .filter((v) => v.householdId === h.id)
+        .sort((a, b) => b.date.localeCompare(a.date));
+      return {
+        id: h.id,
+        name: h.name,
+        createdAt: null,
+        profileCount: profiles.length,
+        profileNames: profiles.map((p) => p.name),
+        trackedCount: s.groupRestaurants.filter((g) => g.householdId === h.id).length,
+        visitCount: visits.length,
+        lastVisitAt: visits[0]?.date ?? null,
+      };
+    });
+  }
+
+  async renameHousehold(id: string, name: string): Promise<{ ok: boolean; error?: string }> {
+    const s = store();
+    const trimmed = name.trim();
+    if (trimmed.length < 2) return { ok: false, error: "Pick a name (2+ characters)." };
+    const nameKey = trimmed.toLowerCase();
+    if (s.households.some((h) => h.id !== id && h.nameKey === nameKey))
+      return { ok: false, error: "Another group already uses that name." };
+    const h = s.households.find((x) => x.id === id);
+    if (h) {
+      h.name = trimmed;
+      h.nameKey = nameKey;
+    }
+    return { ok: true };
+  }
+
+  async deleteHousehold(id: string): Promise<void> {
+    const s = store();
+    const profileIds = new Set(s.profiles.filter((p) => p.householdId === id).map((p) => p.id));
+    const brandIds = new Set(s.brands.filter((b) => b.householdId === id).map((b) => b.id));
+    const sessionIds = new Set(s.voteSessions.filter((v) => v.householdId === id).map((v) => v.id));
+    s.households = s.households.filter((h) => h.id !== id);
+    s.profiles = s.profiles.filter((p) => p.householdId !== id);
+    s.brands = s.brands.filter((b) => b.householdId !== id);
+    s.groupRestaurants = s.groupRestaurants.filter((g) => g.householdId !== id);
+    s.ratings = s.ratings.filter((r) => !brandIds.has(r.brandId) && !profileIds.has(r.profileId));
+    s.visits = s.visits.filter((v) => v.householdId !== id);
+    s.voteSessions = s.voteSessions.filter((v) => v.householdId !== id);
+    s.votes = s.votes.filter((v) => !sessionIds.has(v.sessionId));
+    s.discoveries = s.discoveries.filter((d) => d.householdId !== id);
+    s.seenPlaces = s.seenPlaces.filter((p) => p.householdId !== id);
+    s.settings = s.settings.filter((x) => x.householdId !== id);
+  }
+
+  async listCatalogAdmin(): Promise<import("./adapter").AdminCatalogRow[]> {
+    const s = store();
+    const trackedBy = new Map<string, number>();
+    for (const g of s.groupRestaurants)
+      trackedBy.set(g.restaurantId, (trackedBy.get(g.restaurantId) ?? 0) + 1);
+    return [...s.restaurants]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        cuisines: c.cuisines,
+        price: c.price,
+        address: c.address,
+        googlePlaceId: c.googlePlaceId,
+        mapsUrl: c.mapsUrl,
+        trackedBy: trackedBy.get(c.id) ?? 0,
+      }));
+  }
+
+  async updateCatalogRow(id: string, patch: import("./adapter").AdminCatalogPatch): Promise<void> {
+    const c = store().restaurants.find((r) => r.id === id);
+    if (!c) return;
+    if (patch.name !== undefined) c.name = patch.name;
+    if (patch.cuisines !== undefined) c.cuisines = patch.cuisines;
+    if (patch.price !== undefined) c.price = patch.price;
+    if (patch.address !== undefined) c.address = patch.address;
+    if (patch.mapsUrl !== undefined) c.mapsUrl = patch.mapsUrl;
+  }
+
+  async deleteCatalogRow(id: string): Promise<void> {
+    const s = store();
+    const affectedBrands = new Set(
+      s.groupRestaurants.filter((g) => g.restaurantId === id).map((g) => g.brandId)
+    );
+    s.restaurants = s.restaurants.filter((r) => r.id !== id);
+    s.groupRestaurants = s.groupRestaurants.filter((g) => g.restaurantId !== id);
+    for (const brandId of affectedBrands) {
+      if (s.groupRestaurants.some((g) => g.brandId === brandId)) continue;
+      s.brands = s.brands.filter((b) => b.id !== brandId);
+      s.ratings = s.ratings.filter((r) => r.brandId !== brandId);
+      s.visits = s.visits.filter((v) => v.restaurantId !== brandId);
+    }
+  }
+
+  async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
+    return addCatalogRowsToStore(entries);
   }
 }
 
@@ -485,32 +618,7 @@ export class MemoryAdapter implements DataAdapter {
   }
 
   async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
-    const s = store();
-    let added = 0;
-    for (const e of entries) {
-      const dupe = s.restaurants.find(
-        (c) =>
-          (e.googlePlaceId && c.googlePlaceId === e.googlePlaceId) ||
-          c.name.trim().toLowerCase() === e.name.trim().toLowerCase()
-      );
-      if (dupe) continue;
-      s.restaurants.push({
-        id: randomUUID(),
-        name: e.name,
-        cuisines: e.cuisines,
-        price: e.price,
-        address: e.address,
-        lat: e.lat,
-        lng: e.lng,
-        googlePlaceId: e.googlePlaceId,
-        mapsUrl: e.mapsUrl,
-        reserveUrl: null,
-        tags: [],
-        createdAt: new Date().toISOString(),
-      });
-      added++;
-    }
-    return added;
+    return addCatalogRowsToStore(entries);
   }
 
   async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<string> {
@@ -528,6 +636,29 @@ export class MemoryAdapter implements DataAdapter {
       });
     }
     return brand.id;
+  }
+
+  async trackRestaurantsBulk(
+    restaurantIds: string[],
+    status: "active" | "wishlist"
+  ): Promise<number> {
+    const s = store();
+    let added = 0;
+    for (const restaurantId of new Set(restaurantIds)) {
+      const catalog = s.restaurants.find((r) => r.id === restaurantId);
+      if (!catalog) continue;
+      if (s.groupRestaurants.some((g) => g.householdId === this.hid && g.restaurantId === restaurantId))
+        continue; // already tracked; leave the brand's status alone
+      const brand = this.ensureBrand(catalog.name, status, null);
+      s.groupRestaurants.push({
+        householdId: this.hid,
+        restaurantId,
+        brandId: brand.id,
+        createdAt: new Date().toISOString(),
+      });
+      added++;
+    }
+    return added;
   }
 
   async clearWishlist(): Promise<number> {

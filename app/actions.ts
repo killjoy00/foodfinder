@@ -12,7 +12,7 @@ import {
   setActiveProfile,
 } from "@/lib/auth";
 import { db } from "@/lib/data";
-import { CatalogInput, NewRestaurant } from "@/lib/data/adapter";
+import { NewRestaurant } from "@/lib/data/adapter";
 import {
   DEFAULT_FILTERS,
   DEFAULT_VOTE_SIZE,
@@ -56,7 +56,9 @@ export async function createGroupAction(
 
 export async function selectProfileAction(profileId: string): Promise<void> {
   await setActiveProfile(profileId);
-  redirect("/");
+  // a brand-new family lands on the getting-started page instead of an empty app
+  const tracked = await (await db()).listRestaurants();
+  redirect(tracked.length === 0 ? "/start" : "/");
 }
 
 export async function switchProfileAction(): Promise<void> {
@@ -183,13 +185,6 @@ export async function deleteRestaurantAction(id: string): Promise<void> {
   redirect("/restaurants");
 }
 
-export async function importCatalogAction(entries: CatalogInput[]): Promise<number> {
-  await requireProfile();
-  const added = await (await db()).addCatalogEntries(entries.slice(0, 6000));
-  revalidatePath("/restaurants/browse");
-  return added;
-}
-
 export async function trackRestaurantAction(
   restaurantId: string,
   status: RestaurantStatus
@@ -207,6 +202,29 @@ export async function trackRestaurantAction(
   revalidatePath("/restaurants");
   revalidatePath("/restaurants/browse");
   revalidatePath("/");
+}
+
+/** Cap on one bulk add — bigger than the whole Austin catalog, small enough to stay in one request. */
+const BULK_TRACK_MAX = 4000;
+
+/**
+ * Add many catalog locations to the family's list at once (onboarding and
+ * "add all shown" on Browse). Skips per-row geocoding — locations pick up
+ * coordinates later when tracked or edited individually.
+ */
+export async function trackRestaurantsBulkAction(
+  restaurantIds: string[],
+  status: RestaurantStatus
+): Promise<number> {
+  await requireProfile();
+  const added = await (await db()).trackRestaurantsBulk(
+    restaurantIds.slice(0, BULK_TRACK_MAX),
+    status
+  );
+  revalidatePath("/restaurants");
+  revalidatePath("/restaurants/browse");
+  revalidatePath("/");
+  return added;
 }
 
 /** Split one location out of a brand into its own entry. */

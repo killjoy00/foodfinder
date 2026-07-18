@@ -10,6 +10,33 @@ export function brandKey(name: string): string {
   return name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "");
 }
 
+/**
+ * Plan a bulk track: which brands must be created and which brand key each
+ * catalog location files under. `existingKeys` are the household's current
+ * brand keys; duplicates within the batch collapse to one new brand (first
+ * name wins, matching ensureBrand's behavior).
+ */
+export function planBrandAssignments(
+  items: { id: string; name: string }[],
+  existingKeys: Set<string>
+): {
+  newBrands: { key: string; name: string }[];
+  assignments: { restaurantId: string; key: string }[];
+} {
+  const newBrands = new Map<string, string>();
+  const assignments: { restaurantId: string; key: string }[] = [];
+  for (const item of items) {
+    const key = brandKey(item.name);
+    if (!key) continue;
+    if (!existingKeys.has(key) && !newBrands.has(key)) newBrands.set(key, item.name);
+    assignments.push({ restaurantId: item.id, key });
+  }
+  return {
+    newBrands: [...newBrands].map(([key, name]) => ({ key, name })),
+    assignments,
+  };
+}
+
 /** The location closest to `origin`, or the first when we can't measure. */
 export function nearestLocation(
   locations: RestaurantLocation[],
