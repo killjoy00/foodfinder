@@ -1,21 +1,18 @@
 "use server";
 
-import { createHash } from "crypto";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { loginAdmin, logoutAdmin, requireAdmin } from "@/lib/admin";
 import { registry } from "@/lib/data";
 import { AdminCatalogPatch, CatalogInput } from "@/lib/data/adapter";
-
-// same derivation as lib/auth.ts so admin resets work with family logins
-function passwordHash(password: string): string {
-  return createHash("sha256").update(`foodfinder:${password}`).digest("hex");
-}
+import { hashPassword } from "@/lib/password";
+import { RATE_LIMITED_MESSAGE, allowRequest } from "@/lib/rateLimit";
 
 export async function adminLoginAction(
   _prev: { error: string } | null,
   formData: FormData
 ): Promise<{ error: string } | null> {
+  if (!(await allowRequest("admin-login", 10, 5 * 60_000))) return { error: RATE_LIMITED_MESSAGE };
   const ok = await loginAdmin(String(formData.get("secret") ?? ""));
   if (!ok) return { error: "That's not the admin secret." };
   redirect("/admin");
@@ -45,7 +42,7 @@ export async function adminResetGroupPasswordAction(
   await requireAdmin();
   const password = String(formData.get("password") ?? "");
   if (password.length < 4) return { error: "Pick a password (4+ characters)." };
-  await registry().setHouseholdPassword(id, passwordHash(password));
+  await registry().setHouseholdPassword(id, await hashPassword(password));
   return null;
 }
 

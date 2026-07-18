@@ -22,6 +22,7 @@ import {
   sampleCandidates,
 } from "@/lib/picker";
 import { geocodeAddress, zipToCoords } from "@/lib/geocode";
+import { RATE_LIMITED_MESSAGE, allowRequest } from "@/lib/rateLimit";
 import { distanceMiles } from "@/lib/distance";
 import { findRecommendations } from "@/lib/recommend";
 import { placesKey } from "@/lib/places";
@@ -36,6 +37,7 @@ export async function loginAction(
   _prev: { error: string } | null,
   formData: FormData
 ): Promise<{ error: string } | null> {
+  if (!(await allowRequest("login", 10, 5 * 60_000))) return { error: RATE_LIMITED_MESSAGE };
   const name = String(formData.get("group") ?? "");
   const password = String(formData.get("password") ?? "");
   const ok = await loginToHousehold(name, password);
@@ -47,6 +49,7 @@ export async function createGroupAction(
   _prev: { error: string } | null,
   formData: FormData
 ): Promise<{ error: string } | null> {
+  if (!(await allowRequest("create-group", 5, 60 * 60_000))) return { error: RATE_LIMITED_MESSAGE };
   const name = String(formData.get("group") ?? "");
   const password = String(formData.get("password") ?? "");
   const result = await createHousehold(name, password);
@@ -76,6 +79,8 @@ export async function changePasswordAction(
   formData: FormData
 ): Promise<{ ok: boolean; message: string }> {
   await requireProfile();
+  if (!(await allowRequest("change-password", 10, 5 * 60_000)))
+    return { ok: false, message: RATE_LIMITED_MESSAGE };
   const next = String(formData.get("password") ?? "");
   const confirm = String(formData.get("confirm") ?? "");
   if (next !== confirm) return { ok: false, message: "The two passwords don't match." };

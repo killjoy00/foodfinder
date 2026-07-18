@@ -75,22 +75,24 @@ native share sheet, offline splash/error states, and app-quality navigation.
 Wrapped apps ship this way routinely, but budget for one rejection-and-resubmit
 cycle.
 
-## Phase 0 — Hardening (prerequisite, ~1 week)
+## Phase 0 — Hardening (prerequisite, ~1 week) — ✅ mostly done
 
 Security and correctness work that should happen before any public exposure:
 
-- Replace unsalted SHA-256 password hashing with **bcrypt/argon2** (migrate
-  lazily: verify old hash on login, rehash on success).
-- Remove the `"foodfinder-dev-secret"` fallback in `lib/household.ts` — fail
-  hard if `AUTH_SECRET` is unset in production.
-- **Rate-limit** login, signup, and group-name enumeration (e.g. Vercel
-  firewall rules or an upstash-ratelimit middleware).
-- Add a real `middleware.ts` auth guard instead of per-page checks.
-- Review Google Places usage against ToS (attribution requirements, caching
-  limits) and set a **billing alarm** — a public user base multiplies API
-  calls for autocomplete, sweeps, and geocoding.
-- Basic analytics/error reporting (Vercel Analytics + Sentry) so you can see
-  usage and crashes before strangers do.
+- ✅ Passwords now hash with **bcrypt** (`lib/password.ts`); legacy SHA-256
+  hashes verify and migrate automatically on the next successful login.
+- ✅ The `"foodfinder-dev-secret"` fallback fails hard in production when a
+  real database is configured (`lib/secret.ts`) — `AUTH_SECRET` is required.
+- ✅ **Rate limiting** on login (10/5 min), group creation (5/hour), password
+  change, and admin login (`lib/rateLimit.ts`). Per-instance in-memory; move
+  to a shared store (Upstash) if abuse shows up in practice.
+- ✅ `middleware.ts` verifies the signed household cookie at the edge before
+  any app page runs (per-page checks retained as the second layer).
+- ✅ **Vercel Analytics** wired into the root layout (enable in the Vercel
+  dashboard). Sentry deferred until there's public traffic to triage.
+- ⏳ Operational, on the owner: set the Google Places **budget alert and
+  per-day quota caps** (see DEPLOY.md §3) and review attribution requirements
+  when Places data gets public exposure.
 
 ## Phase 1 — Accounts for the public (Option B, ~2–3 weeks)
 
