@@ -1,7 +1,7 @@
-import { createHash } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { DEMO_HOUSEHOLD_ID, db, isDemoMode, registry } from "./data";
+import { hashPassword, verifyPassword } from "./password";
 import {
   clearActiveHousehold,
   getActiveHouseholdId,
@@ -11,10 +11,6 @@ import { Household, Profile } from "./types";
 
 const PROFILE_COOKIE = "ff_profile";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-
-function passwordHash(password: string): string {
-  return createHash("sha256").update(`foodfinder:${password}`).digest("hex");
-}
 
 // ---------- households (groups) ----------
 
@@ -35,7 +31,13 @@ export async function loginToHousehold(name: string, password: string): Promise<
     return true;
   }
   const household = await registry().findHouseholdByName(name);
-  if (!household || household.passwordHash !== passwordHash(password)) return false;
+  if (!household) return false;
+  const check = await verifyPassword(password, household.passwordHash);
+  if (!check.ok) return false;
+  if (check.needsRehash) {
+    // lazy migration off the legacy SHA-256 scheme
+    await registry().setHouseholdPassword(household.id, await hashPassword(password));
+  }
   await setActiveHousehold(household.id);
   await clearActiveProfile(); // don't carry a profile over from another group
   return true;
@@ -54,7 +56,7 @@ export async function createHousehold(
   }
   const existing = await registry().findHouseholdByName(trimmed);
   if (existing) return { ok: false, error: "That group name is already taken." };
-  const household = await registry().createHousehold(trimmed, passwordHash(password));
+  const household = await registry().createHousehold(trimmed, await hashPassword(password));
   await setActiveHousehold(household.id);
   await clearActiveProfile();
   return { ok: true };
@@ -72,7 +74,7 @@ export async function changeGroupPassword(
   if (isDemoMode()) return { ok: false, error: "Passwords aren't used in demo mode." };
   const id = await getActiveHouseholdId();
   if (!id) return { ok: false, error: "You're not logged into a group." };
-  await registry().setHouseholdPassword(id, passwordHash(newPassword));
+  await registry().setHouseholdPassword(id, await hashPassword(newPassword));
   return { ok: true };
 }
 

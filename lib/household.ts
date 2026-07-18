@@ -1,12 +1,9 @@
 import { createHmac } from "crypto";
 import { cookies } from "next/headers";
+import { authSecret as secret } from "./secret";
 
 const HOUSEHOLD_COOKIE = "ff_household";
 const MAX_AGE = 60 * 60 * 24 * 365; // a year
-
-function secret(): string {
-  return process.env.AUTH_SECRET || process.env.CRON_SECRET || "foodfinder-dev-secret";
-}
 
 /** Sign the household id so a user can't swap their cookie to another group. */
 function sign(id: string): string {

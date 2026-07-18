@@ -66,7 +66,9 @@ new-restaurant feed, and recommendations.
    Under "API restrictions", restrict the key to the Places API (New).
 4. **Billing**: Google requires a billing account, but personal usage stays
    inside the free monthly caps. To be safe, set a budget alert at $5
-   (Billing → Budgets & alerts).
+   (Billing → Budgets & alerts) AND cap requests per day (APIs & Services →
+   Places API (New) → Quotas) — with more users the API bill is the one cost
+   in the stack that can grow on its own.
 5. In Vercel: **Project → Settings → Environment Variables** → add
    `GOOGLE_PLACES_API_KEY`, then **Deployments → ⋯ → Redeploy**.
 6. In the app: **Settings → Home location** — enter your ZIP code and a

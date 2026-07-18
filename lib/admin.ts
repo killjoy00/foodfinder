@@ -2,13 +2,10 @@ import { createHmac, timingSafeEqual } from "crypto";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { isDemoMode } from "./data";
+import { authSecret as secret } from "./secret";
 
 const ADMIN_COOKIE = "ff_admin";
 const MAX_AGE = 60 * 60 * 24 * 30; // a month — shorter than family logins on purpose
-
-function secret(): string {
-  return process.env.AUTH_SECRET || process.env.CRON_SECRET || "foodfinder-dev-secret";
-}
 
 /** The cookie holds an HMAC over a fixed label, so only the server can mint it. */
 function adminToken(): string {
