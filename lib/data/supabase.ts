@@ -14,7 +14,7 @@ import {
   VoteSession,
 } from "../types";
 import { DataAdapter, DiscoveryInput, HouseholdAuth, HouseholdRegistry, NewRestaurant } from "./adapter";
-import { brandKey, buildBrand } from "../brand";
+import { brandKey, buildBrand, planBrandAssignments } from "../brand";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Row = Record<string, any>;
@@ -135,6 +135,84 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+/**
+ * PostgREST caps a single response at ~1000 rows regardless of .limit(), so
+ * whole-table reads have to be paged with .range(). Ordering must be stable
+ * across pages (include a unique column).
+ */
+async function fetchAllRows(
+  client: SupabaseClient,
+  table: string,
+  select: string,
+  orderCols: string[]
+): Promise<Row[]> {
+  const PAGE = 1000;
+  const out: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = client.from(table).select(select);
+    for (const col of orderCols) q = q.order(col, { ascending: true });
+    const rows = await unwrap(q.range(from, from + PAGE - 1));
+    const batch = (rows ?? []) as unknown as Row[];
+    out.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return out;
+}
+
+/** Bulk-add rows to the shared catalog, skipping dupes; shared by the family import and the admin console. */
+async function addCatalogRows(
+  client: SupabaseClient,
+  entries: import("./adapter").CatalogInput[]
+): Promise<number> {
+  if (entries.length === 0) return 0;
+  const toRow = (e: import("./adapter").CatalogInput) => ({
+    name: e.name,
+    cuisines: e.cuisines,
+    price: e.price,
+    address: e.address,
+    lat: e.lat,
+    lng: e.lng,
+    google_place_id: e.googlePlaceId,
+    maps_url: e.mapsUrl,
+  });
+  let added = 0;
+
+  // entries with a Google place id: upsert ignoring existing
+  const withPid = entries.filter((e) => e.googlePlaceId);
+  for (const part of chunk(withPid, 500)) {
+    const inserted = await unwrap(
+      client
+        .from("restaurants")
+        .upsert(part.map(toRow), { onConflict: "google_place_id", ignoreDuplicates: true })
+        .select("id")
+    );
+    added += (inserted ?? []).length;
+  }
+
+  // entries without a place id: dedupe by name against the catalog + batch
+  const withoutPid = entries.filter((e) => !e.googlePlaceId);
+  if (withoutPid.length) {
+    const existing = new Set<string>();
+    const names = [...new Set(withoutPid.map((e) => e.name))];
+    for (const part of chunk(names, 200)) {
+      const rows = await unwrap(client.from("restaurants").select("name").in("name", part));
+      for (const r of (rows ?? []) as Row[]) existing.add(r.name.toLowerCase());
+    }
+    const seen = new Set<string>();
+    const fresh = withoutPid.filter((e) => {
+      const k = e.name.trim().toLowerCase();
+      if (existing.has(k) || seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    for (const part of chunk(fresh, 500)) {
+      const inserted = await unwrap(client.from("restaurants").insert(part.map(toRow)).select("id"));
+      added += (inserted ?? []).length;
+    }
+  }
+  return added;
+}
+
 export class SupabaseRegistry implements HouseholdRegistry {
   private client: SupabaseClient;
   constructor(url: string, key: string) {
@@ -172,6 +250,127 @@ export class SupabaseRegistry implements HouseholdRegistry {
   }
   async setHouseholdPassword(id: string, passwordHash: string): Promise<void> {
     await unwrap(this.client.from("households").update({ password_hash: passwordHash }).eq("id", id));
+  }
+
+  // ---------- admin console (cross-tenant) ----------
+
+  async listHouseholdSummaries(): Promise<import("./adapter").AdminHouseholdSummary[]> {
+    const [households, profiles] = await Promise.all([
+      unwrap(this.client.from("households").select("id, name, created_at").order("created_at")),
+      unwrap(this.client.from("profiles").select("household_id, name").order("created_at")),
+    ]);
+    const profilesByHid = new Map<string, string[]>();
+    for (const p of (profiles ?? []) as Row[]) {
+      const list = profilesByHid.get(p.household_id) ?? [];
+      list.push(p.name);
+      profilesByHid.set(p.household_id, list);
+    }
+    // the household count stays small, so a couple of head-count queries per
+    // group beats shipping every link/visit row over the wire
+    return Promise.all(
+      ((households ?? []) as Row[]).map(async (h) => {
+        const [tracked, visits] = await Promise.all([
+          this.client
+            .from("group_restaurants")
+            .select("restaurant_id", { count: "exact", head: true })
+            .eq("household_id", h.id),
+          this.client
+            .from("visits")
+            .select("date", { count: "exact" })
+            .eq("household_id", h.id)
+            .order("date", { ascending: false })
+            .limit(1),
+        ]);
+        return {
+          id: h.id,
+          name: h.name,
+          createdAt: h.created_at ?? null,
+          profileCount: (profilesByHid.get(h.id) ?? []).length,
+          profileNames: profilesByHid.get(h.id) ?? [],
+          trackedCount: tracked.count ?? 0,
+          visitCount: visits.count ?? 0,
+          lastVisitAt: (visits.data as Row[] | null)?.[0]?.date ?? null,
+        };
+      })
+    );
+  }
+
+  async renameHousehold(id: string, name: string): Promise<{ ok: boolean; error?: string }> {
+    const trimmed = name.trim();
+    if (trimmed.length < 2) return { ok: false, error: "Pick a name (2+ characters)." };
+    const nameKey = trimmed.toLowerCase();
+    const clash = await unwrap(
+      this.client.from("households").select("id").eq("name_key", nameKey).neq("id", id).maybeSingle()
+    );
+    if (clash) return { ok: false, error: "Another group already uses that name." };
+    await unwrap(
+      this.client.from("households").update({ name: trimmed, name_key: nameKey }).eq("id", id)
+    );
+    return { ok: true };
+  }
+
+  async deleteHousehold(id: string): Promise<void> {
+    // every child table cascades on household delete
+    await unwrap(this.client.from("households").delete().eq("id", id));
+  }
+
+  async listCatalogAdmin(): Promise<import("./adapter").AdminCatalogRow[]> {
+    const [catalog, links] = await Promise.all([
+      fetchAllRows(
+        this.client,
+        "restaurants",
+        "id, name, cuisines, price, address, google_place_id, maps_url",
+        ["name", "id"]
+      ),
+      fetchAllRows(this.client, "group_restaurants", "restaurant_id", ["restaurant_id", "household_id"]),
+    ]);
+    const trackedBy = new Map<string, number>();
+    for (const l of links) trackedBy.set(l.restaurant_id, (trackedBy.get(l.restaurant_id) ?? 0) + 1);
+    return catalog.map((c) => ({
+      id: c.id,
+      name: c.name,
+      cuisines: c.cuisines ?? [],
+      price: c.price ?? 2,
+      address: c.address,
+      googlePlaceId: c.google_place_id,
+      mapsUrl: c.maps_url,
+      trackedBy: trackedBy.get(c.id) ?? 0,
+    }));
+  }
+
+  async updateCatalogRow(id: string, patch: import("./adapter").AdminCatalogPatch): Promise<void> {
+    const row: Row = {};
+    if (patch.name !== undefined) row.name = patch.name;
+    if (patch.cuisines !== undefined) row.cuisines = patch.cuisines;
+    if (patch.price !== undefined) row.price = patch.price;
+    if (patch.address !== undefined) row.address = patch.address;
+    if (patch.mapsUrl !== undefined) row.maps_url = patch.mapsUrl;
+    if (Object.keys(row).length === 0) return;
+    await unwrap(this.client.from("restaurants").update(row).eq("id", id));
+  }
+
+  async deleteCatalogRow(id: string): Promise<void> {
+    // remember which brands pointed at this location before the cascade
+    const links = await unwrap(
+      this.client.from("group_restaurants").select("household_id, brand_id").eq("restaurant_id", id)
+    );
+    await unwrap(this.client.from("restaurants").delete().eq("id", id));
+    // brands left with zero locations would show as empty entries in family
+    // lists, so clean them up (their ratings/visits cascade with them)
+    const brandIds = [...new Set(((links ?? []) as Row[]).map((l) => l.brand_id).filter(Boolean))];
+    for (const brandId of brandIds) {
+      const remaining = await this.client
+        .from("group_restaurants")
+        .select("restaurant_id", { count: "exact", head: true })
+        .eq("brand_id", brandId);
+      if ((remaining.count ?? 0) === 0) {
+        await unwrap(this.client.from("brands").delete().eq("id", brandId));
+      }
+    }
+  }
+
+  async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
+    return addCatalogRows(this.client, entries);
   }
 }
 
@@ -464,28 +663,13 @@ export class SupabaseAdapter implements DataAdapter {
     await unwrap(this.client.from("brands").delete().eq("id", id).eq("household_id", this.hid));
   }
 
-  /**
-   * PostgREST caps a single response at ~1000 rows regardless of .limit(),
-   * so the shared catalog (thousands of rows) has to be paged with .range().
-   * Ordering by (name, id) keeps pagination stable across pages.
-   */
   private async fetchAllCatalogRows(): Promise<Row[]> {
-    const PAGE = 1000;
-    const out: Row[] = [];
-    for (let from = 0; ; from += PAGE) {
-      const rows = await unwrap(
-        this.client
-          .from("restaurants")
-          .select("id, name, cuisines, price, address, lat, lng, maps_url")
-          .order("name", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, from + PAGE - 1)
-      );
-      const batch = (rows ?? []) as Row[];
-      out.push(...batch);
-      if (batch.length < PAGE) break;
-    }
-    return out;
+    return fetchAllRows(
+      this.client,
+      "restaurants",
+      "id, name, cuisines, price, address, lat, lng, maps_url",
+      ["name", "id"]
+    );
   }
 
   async listCatalog(): Promise<import("./adapter").CatalogEntry[]> {
@@ -528,55 +712,7 @@ export class SupabaseAdapter implements DataAdapter {
   }
 
   async addCatalogEntries(entries: import("./adapter").CatalogInput[]): Promise<number> {
-    if (entries.length === 0) return 0;
-    const toRow = (e: import("./adapter").CatalogInput) => ({
-      name: e.name,
-      cuisines: e.cuisines,
-      price: e.price,
-      address: e.address,
-      lat: e.lat,
-      lng: e.lng,
-      google_place_id: e.googlePlaceId,
-      maps_url: e.mapsUrl,
-    });
-    let added = 0;
-
-    // entries with a Google place id: upsert ignoring existing
-    const withPid = entries.filter((e) => e.googlePlaceId);
-    for (const part of chunk(withPid, 500)) {
-      const inserted = await unwrap(
-        this.client
-          .from("restaurants")
-          .upsert(part.map(toRow), { onConflict: "google_place_id", ignoreDuplicates: true })
-          .select("id")
-      );
-      added += (inserted ?? []).length;
-    }
-
-    // entries without a place id: dedupe by name against the catalog + batch
-    const withoutPid = entries.filter((e) => !e.googlePlaceId);
-    if (withoutPid.length) {
-      const existing = new Set<string>();
-      const names = [...new Set(withoutPid.map((e) => e.name))];
-      for (const part of chunk(names, 200)) {
-        const rows = await unwrap(this.client.from("restaurants").select("name").in("name", part));
-        for (const r of (rows ?? []) as Row[]) existing.add(r.name.toLowerCase());
-      }
-      const seen = new Set<string>();
-      const fresh = withoutPid.filter((e) => {
-        const k = e.name.trim().toLowerCase();
-        if (existing.has(k) || seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-      for (const part of chunk(fresh, 500)) {
-        const inserted = await unwrap(
-          this.client.from("restaurants").insert(part.map(toRow)).select("id")
-        );
-        added += (inserted ?? []).length;
-      }
-    }
-    return added;
+    return addCatalogRows(this.client, entries);
   }
 
   async trackRestaurant(restaurantId: string, status: "active" | "wishlist"): Promise<string> {
@@ -593,6 +729,70 @@ export class SupabaseAdapter implements DataAdapter {
       )
     );
     return brandId;
+  }
+
+  async trackRestaurantsBulk(
+    restaurantIds: string[],
+    status: "active" | "wishlist"
+  ): Promise<number> {
+    const ids = [...new Set(restaurantIds)];
+    if (ids.length === 0) return 0;
+
+    // names for the requested catalog locations
+    const items: { id: string; name: string }[] = [];
+    for (const part of chunk(ids, IN_CHUNK)) {
+      const rows = await unwrap(this.client.from("restaurants").select("id, name").in("id", part));
+      for (const r of (rows ?? []) as Row[]) items.push({ id: r.id, name: r.name });
+    }
+
+    // existing brands for this household, by brand key
+    const brandRows = await unwrap(
+      this.client.from("brands").select("id, brand_key").eq("household_id", this.hid)
+    );
+    const brandIdByKey = new Map<string, string>(
+      ((brandRows ?? []) as Row[]).map((b) => [b.brand_key, b.id])
+    );
+
+    const plan = planBrandAssignments(items, new Set(brandIdByKey.keys()));
+
+    // create the missing brands in batches
+    for (const part of chunk(plan.newBrands, 500)) {
+      const inserted = await unwrap(
+        this.client
+          .from("brands")
+          .insert(
+            part.map((b) => ({
+              household_id: this.hid,
+              brand_key: b.key,
+              name: b.name,
+              status,
+            }))
+          )
+          .select("id, brand_key")
+      );
+      for (const b of (inserted ?? []) as Row[]) brandIdByKey.set(b.brand_key, b.id);
+    }
+
+    // link the locations; already-tracked rows are skipped (existing brands
+    // keep their status — a bulk add never downgrades "active" to "wishlist")
+    const links = plan.assignments
+      .map((a) => ({
+        household_id: this.hid,
+        restaurant_id: a.restaurantId,
+        brand_id: brandIdByKey.get(a.key),
+      }))
+      .filter((l) => l.brand_id);
+    let added = 0;
+    for (const part of chunk(links, 500)) {
+      const inserted = await unwrap(
+        this.client
+          .from("group_restaurants")
+          .upsert(part, { onConflict: "household_id,restaurant_id", ignoreDuplicates: true })
+          .select("restaurant_id")
+      );
+      added += (inserted ?? []).length;
+    }
+    return added;
   }
 
   async clearWishlist(): Promise<number> {

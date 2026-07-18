@@ -26,6 +26,12 @@ member, and let a weighted spin wheel settle "where should we eat tonight?"
   price range your ratings show you love (requires a free Google Places key).
 - **Google Takeout import** — seed the app from your existing Google Maps
   ratings and saved places in minutes. **CSV export** anytime.
+- **Getting-started flow** — new groups land on `/start`: browse the shared
+  catalog, bulk-add whole cuisines to the wishlist, import Takeout, or grab
+  the entire catalog in one tap.
+- **Owner admin console** — `/admin` (gated by `ADMIN_SECRET`): see every
+  group that signed up, reset passwords, rename/delete groups, and edit or
+  bulk-import the shared master catalog.
 - **PWA** — installs to phone home screens like a native app.
 - **Deep links** — Google Maps and OpenTable from every result.
 

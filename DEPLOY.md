@@ -44,6 +44,7 @@ accounts on Supabase and Vercel. No credit card for either.
    | `SUPABASE_SERVICE_ROLE_KEY` | the service_role key from step 1.5 |
    | `AUTH_SECRET` | any long random string (signs the login cookie) |
    | `CRON_SECRET` | any random string (mash the keyboard) |
+   | `ADMIN_SECRET` | any long random string — your key to the owner console at `/admin` |
 
 4. Click **Deploy**. ~2 minutes later you get a URL like
    `https://foodfinder-xyz.vercel.app`. That's your app — open it, tap **New
@@ -92,6 +93,22 @@ those files in the app: reviews become "Been there" with your ratings;
 saved places and list CSVs go to the wishlist. Untick non-restaurants in
 the preview. Then spend five minutes adding cuisines/prices to your top
 spots — the picker gets smarter with every rating and visit you log.
+
+New groups also land on a **getting-started page** (`/start`) after picking a
+profile: browse the shared catalog, bulk-add whole cuisines to the wishlist,
+import Takeout, or add the entire catalog in one tap.
+
+## 6. Owner admin console
+
+Visit `/admin` and log in with your `ADMIN_SECRET`. From there you can:
+
+- see every group that has signed up (members, list size, visits, last activity),
+- rename a group, reset its password (for locked-out families), or delete it,
+- edit or delete master-catalog entries, see how many families track each one,
+  and bulk-import a city CSV (the same format as `scripts/gen-catalog-seed.mjs`).
+
+The catalog CSV import used to live on the family Import page; it's admin-only
+now so families can't edit the shared list by accident.
 
 ## Troubleshooting
 
