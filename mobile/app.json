@@ -44,6 +44,14 @@
       "onDemandFilesystem": "UNSTABLE_ALLOW_ALL"
     },
     "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "enableSceneSupport": true
+          }
+        }
+      ],
       "expo-router",
       "expo-secure-store",
       [
