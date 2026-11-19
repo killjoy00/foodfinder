@@ -1,0 +1,59 @@
+name: iOS 27 native build
+on:
+  pull_request:
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/ios27-validate.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ios27:
+    name: Expo scene lifecycle and unsigned iPhone build
+    runs-on: xcode-27
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - name: Verify iOS 27 SDK
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          major="${sdk%%.*}"
+          if (( major < 27 )); then echo "::error::iOS 27 SDK required, found $sdk"; exit 1; fi
+      - name: Install frozen dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Verify Expo scene lifecycle setting
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const config = require('./app.json').expo;
+          const scene = config.plugins.find(p => Array.isArray(p) && p[0] === 'expo-build-properties');
+          if (!scene || scene[1]?.ios?.enableSceneSupport !== true) {
+            throw new Error('Expo 57 must opt in to UIKit scenes for iOS 27');
+          }
+          NODE
+      - name: Generate native iOS project
+        env:
+          CI: '1'
+        run: npx expo prebuild --platform ios --clean
+      - name: Confirm generated UIKit scene manifest
+        run: |
+          set -euo pipefail
+          plist="$(find ios -path '*/Info.plist' -print -quit)"
+          test -n "$plist"
+          grep -Fq 'EXExpoAppSceneDelegate' "$plist"
+      - name: Compile unsigned iPhone app
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -n "$workspace"
+          xcodebuild -workspace "$workspace" -scheme FoodFinder -configuration Release -destination 'generic/platform=iOS' -derivedDataPath "$RUNNER_TEMP/FoodFinderDerivedData" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
